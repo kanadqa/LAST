@@ -54,9 +54,6 @@ const capitalPanels = document.querySelectorAll("[data-capital-tab-panel]");
 const capitalAssetsTotal = document.getElementById("capitalAssetsTotal");
 const capitalDebtsTotal = document.getElementById("capitalDebtsTotal");
 const capitalNetWorth = document.getElementById("capitalNetWorth");
-const capitalLedger = document.getElementById("capitalLedger");
-const capitalLedgerTotal = document.getElementById("capitalLedgerTotal");
-const capitalLedgerNote = document.getElementById("capitalLedgerNote");
 const capitalOverviewBody = document.getElementById("capitalOverviewBody");
 const capitalOverviewTotal = document.getElementById("capitalOverviewTotal");
 const capitalOverviewNote = document.getElementById("capitalOverviewNote");
@@ -69,7 +66,6 @@ const capitalOverviewGoals = document.getElementById("capitalOverviewGoals");
 const capitalOverviewSnapshots = document.getElementById("capitalOverviewSnapshots");
 const capitalOverviewDebtsList = document.getElementById("capitalOverviewDebtsList");
 const capitalStructureButtons = document.querySelectorAll("[data-capital-structure]");
-const capitalOverviewFilters = document.querySelectorAll("[data-capital-filter]");
 const capitalAssetTypePie = document.getElementById("capitalAssetTypePie");
 const capitalAssetTypeChart = document.getElementById("capitalAssetTypeChart");
 const capitalExportButton = document.getElementById("capitalExport");
@@ -530,7 +526,6 @@ let categoryFilter = "all";
 let reportGranularity = "daily";
 let reportRange = { start: "", end: "" };
 let capitalState = null;
-let capitalOverviewFilter = "all";
 let capitalEditingAssetId = null;
 let editingTransactionId = null;
 let activeView = "dashboard";
@@ -1737,115 +1732,6 @@ const renderCapitalSummary = () => {
   return totals;
 };
 
-const renderCapitalLedger = () => {
-  if (!capitalLedger) {
-    return;
-  }
-  const totals = capitalTotals();
-  capitalLedger.innerHTML = "";
-  capitalLedgerTotal.textContent = capitalFormatMoney(totals.assetsTotal);
-  capitalLedgerNote.textContent = totals.missingRates.length
-    ? `Не учтены суммы без курса: ${[...new Set(totals.missingRates)].join(", ")}.`
-    : "";
-
-  const filteredAssets = capitalState.assets.filter((asset) => {
-    if (capitalOverviewFilter === "all") {
-      return true;
-    }
-    return asset.liquidity === capitalOverviewFilter;
-  });
-
-  if (!filteredAssets.length) {
-    capitalLedger.innerHTML = "<p class='hint'>Добавьте активы, чтобы увидеть список.</p>";
-    return;
-  }
-
-  const header = document.createElement("div");
-  header.className = "capital-ledger-row capital-ledger-head";
-  header.innerHTML = `
-    <div>Актив</div>
-    <div class="capital-ledger-amount">Сумма (${capitalState.settings.baseCurrency})</div>
-    <div class="capital-ledger-profit">Потенциальная доходность</div>
-    <div class="capital-ledger-note">Комментарий</div>
-  `;
-  capitalLedger.appendChild(header);
-
-  const grouped = new Map();
-  filteredAssets.forEach((asset) => {
-    const category = asset.category || asset.section || "В наличии";
-    if (!grouped.has(category)) {
-      grouped.set(category, new Map());
-    }
-    const subcategory = asset.subcategory || "Без подкатегории";
-    if (!grouped.get(category).has(subcategory)) {
-      grouped.get(category).set(subcategory, []);
-    }
-    grouped.get(category).get(subcategory).push(asset);
-  });
-
-  grouped.forEach((subcategories, categoryName) => {
-    const categoryHeader = document.createElement("div");
-    categoryHeader.className = "capital-ledger-section";
-    categoryHeader.textContent = categoryName;
-    capitalLedger.appendChild(categoryHeader);
-
-    subcategories.forEach((assets, subcategoryName) => {
-      const subHeader = document.createElement("div");
-      subHeader.className = "capital-ledger-note";
-      subHeader.textContent = subcategoryName;
-      capitalLedger.appendChild(subHeader);
-
-      assets.forEach((asset) => {
-        const converted = capitalToBase(asset.amount, asset.currency);
-        const hasRate = converted != null || !capitalIsUnconvertible(asset);
-        const amountLabel = hasRate
-          ? capitalFormatMoney(converted ?? asset.amount)
-          : `нет курса для ${asset.currency}`;
-
-        let profitLabel = "—";
-        let profitSubtext = "";
-        if (asset.expectedProfit != null && asset.expectedProfit !== "") {
-          const profitConverted = capitalToBase(asset.expectedProfit, asset.currency);
-          if (profitConverted == null && capitalIsUnconvertible(asset)) {
-            profitLabel = `нет курса для ${asset.currency}`;
-          } else {
-            profitLabel = capitalFormatMoney(profitConverted ?? asset.expectedProfit);
-            if (asset.currency !== capitalState.settings.baseCurrency) {
-              profitSubtext = `оригинал: ${asset.expectedProfit.toFixed(2)} ${asset.currency}`;
-            }
-          }
-        }
-
-        const row = document.createElement("div");
-        row.className = `capital-ledger-row${hasRate ? "" : " is-warning"}`;
-        row.innerHTML = `
-          <div>
-            <div>${asset.name}</div>
-            <div class="capital-ledger-meta">
-              <span>${asset.category || asset.section || "В наличии"}</span>
-              <span>${asset.subcategory || "Без подкатегории"}</span>
-              <span>${capitalLiquidityLabel(asset.liquidity)}</span>
-            </div>
-          </div>
-          <div class="capital-ledger-amount">
-            ${amountLabel}
-            ${asset.currency !== capitalState.settings.baseCurrency && hasRate
-              ? `<span>оригинал: ${asset.amount.toFixed(2)} ${asset.currency}</span>`
-              : ""}
-          </div>
-          <div class="capital-ledger-profit">
-            ${profitLabel}
-            ${asset.maturityDate ? `<span>ожидаемо к ${asset.maturityDate}</span>` : ""}
-            ${profitSubtext ? `<span>${profitSubtext}</span>` : ""}
-          </div>
-          <div class="capital-ledger-note">${asset.note || "—"}</div>
-        `;
-        capitalLedger.appendChild(row);
-      });
-    });
-  });
-};
-
 const renderCapitalStructureCharts = () => {
   if (!capitalAssetTypeChart || !capitalAssetTypePie) {
     return;
@@ -3006,7 +2892,6 @@ const renderCapitalView = () => {
   capitalEnsureSnapshot();
   renderCapitalSummary();
   renderCapitalOverviewDashboard();
-  renderCapitalLedger();
   renderCapitalStructureCharts();
   renderCapitalAssets();
   renderCapitalDebts();
@@ -3106,7 +2991,6 @@ const capitalUpdateAsset = (id, field, value) => {
     renderCapitalCategories();
   }
   renderCapitalSummary();
-  renderCapitalLedger();
   renderCapitalStructureCharts();
   renderCapitalOverview();
 };
@@ -3125,7 +3009,6 @@ const capitalUpdateDebt = (id, field, value) => {
   debt.updatedAt = capitalNowIso();
   saveCapitalV2(capitalState);
   renderCapitalSummary();
-  renderCapitalLedger();
   renderCapitalStructureCharts();
   renderCapitalOverview();
   renderCapitalDebts();
@@ -4285,13 +4168,6 @@ onAll(capitalTabs, "click", (event) => {
       }
     }
   }, "удаление категории капитала");
-
-  onAll(capitalOverviewFilters, "click", (event) => {
-    capitalOverviewFilters.forEach((item) => item.classList.remove("is-active"));
-    event.currentTarget.classList.add("is-active");
-    capitalOverviewFilter = event.currentTarget.dataset.capitalFilter;
-    renderCapitalLedger();
-  }, "фильтр капитала");
 
   on(capitalAssetType, "change", () => {
     const isDeposit = capitalAssetType.value === "deposit";
