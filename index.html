@@ -119,7 +119,7 @@
 
         <section class="view" data-view="transactions">
           <section class="card">
-            <h2>Добавить операцию</h2>
+            <h2 id="transactionFormTitle">Добавить операцию</h2>
             <form id="transactionForm" class="form">
               <label>
                 Дата
@@ -148,7 +148,10 @@
                 Комментарий
                 <input type="text" id="note" placeholder="Опционально" />
               </label>
-              <button type="submit" class="button primary">Сохранить</button>
+              <div class="form-actions">
+                <button id="transactionCancel" type="button" class="button secondary is-hidden">Отмена</button>
+                <button type="submit" class="button primary">Сохранить</button>
+              </div>
             </form>
           </section>
 
@@ -527,7 +530,12 @@
                 Фото
                 <input type="file" id="capitalAssetAvatar" accept="image/*" />
               </label>
-              <button id="capitalAssetAvatarRemove" type="button" class="button secondary small">Удалить фото</button>
+              <div class="capital-asset-avatar-row full">
+                <div id="capitalAssetAvatarPreview" class="capital-asset-avatar-preview">
+                  <span class="hint">Фото пока не выбрано</span>
+                </div>
+                <button id="capitalAssetAvatarRemove" type="button" class="button secondary small is-hidden">Удалить фото</button>
+              </div>
               <label>
                 Подкатегория
                 <input type="text" id="capitalAssetSubcategory" list="capitalSubcategoryList" placeholder="Например, Сбербанк" />

@@ -10,6 +10,8 @@ const undoButton = document.getElementById("undoAction");
 const backupButton = document.getElementById("backupJson");
 const restoreInput = document.getElementById("restoreJson");
 const errorBanner = document.getElementById("errorBanner");
+const transactionFormTitle = document.getElementById("transactionFormTitle");
+const transactionCancelButton = document.getElementById("transactionCancel");
 const categorySelect = document.getElementById("category");
 const subcategorySelect = document.getElementById("subcategory");
 const categoryTypeSelect = document.getElementById("categoryType");
@@ -93,6 +95,7 @@ const capitalAssetSubcategory = document.getElementById("capitalAssetSubcategory
 const capitalAssetIcon = document.getElementById("capitalAssetIcon");
 const capitalAssetAvatar = document.getElementById("capitalAssetAvatar");
 const capitalAssetAvatarRemove = document.getElementById("capitalAssetAvatarRemove");
+const capitalAssetAvatarPreview = document.getElementById("capitalAssetAvatarPreview");
 const capitalSubcategoryList = document.getElementById("capitalSubcategoryList");
 const capitalAssetMaturityDate = document.getElementById("capitalAssetMaturityDate");
 const capitalAssetLiquidity = document.getElementById("capitalAssetLiquidity");
@@ -528,6 +531,7 @@ let reportRange = { start: "", end: "" };
 let capitalState = null;
 let capitalOverviewFilter = "all";
 let capitalEditingAssetId = null;
+let editingTransactionId = null;
 let activeView = "dashboard";
 let currentLayout = "comfort";
 const assetFilters = {
@@ -735,6 +739,34 @@ const updateSummary = () => {
   expensePercentEl.textContent = `${percent.toFixed(1)}% от доходов`;
 };
 
+const setTransactionFormMode = (mode, transaction = null) => {
+  editingTransactionId = mode === "edit" && transaction ? transaction.id : null;
+  if (transactionFormTitle) {
+    transactionFormTitle.textContent = editingTransactionId ? "Редактировать операцию" : "Добавить операцию";
+  }
+  if (transactionCancelButton) {
+    transactionCancelButton.classList.toggle("is-hidden", !editingTransactionId);
+  }
+  if (transactionSubmitButton) {
+    transactionSubmitButton.textContent = editingTransactionId ? "Сохранить изменения" : "Сохранить";
+  }
+};
+
+const ensureSubcategoryOption = (value) => {
+  if (!subcategorySelect || !value) {
+    return;
+  }
+  const hasOption = [...subcategorySelect.options].some((option) => option.value === value);
+  if (!hasOption) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    subcategorySelect.appendChild(option);
+  }
+  subcategorySelect.disabled = false;
+  subcategorySelect.value = value;
+};
+
 const renderTable = () => {
   tableBody.innerHTML = "";
 
@@ -762,7 +794,10 @@ const renderTable = () => {
         <td>${item.subcategory || "—"}</td>
         <td>${currencyFormatter.format(item.amount)}</td>
         <td>${item.note || "—"}</td>
-        <td><button class="button secondary" data-id="${item.id}">Удалить</button></td>
+        <td class="table-actions">
+          <button class="button secondary small" data-action="edit" data-id="${item.id}">Ред.</button>
+          <button class="button secondary small" data-action="delete" data-id="${item.id}">Удалить</button>
+        </td>
       `;
       tableBody.appendChild(row);
     });
@@ -1431,18 +1466,29 @@ const compressImageToDataUrl = async (file) => {
   const dy = (size - height) / 2;
   ctx.drawImage(bitmap, dx, dy, width, height);
 
-  const formats = ["image/webp", "image/jpeg"];
-  for (const format of formats) {
-    let quality = 0.8;
-    while (quality >= 0.5) {
-      const dataUrl = canvas.toDataURL(format, quality);
-      if (dataUrlSizeBytes(dataUrl) <= 150 * 1024) {
-        return dataUrl;
-      }
-      quality -= 0.1;
+  let quality = 0.9;
+  const limit = 180 * 1024;
+  while (quality >= 0.4) {
+    const dataUrl = canvas.toDataURL("image/jpeg", quality);
+    if (dataUrlSizeBytes(dataUrl) <= limit) {
+      return dataUrl;
     }
+    quality -= 0.05;
   }
-  return canvas.toDataURL("image/jpeg", 0.5);
+  return canvas.toDataURL("image/jpeg", 0.4);
+};
+
+const updateCapitalAssetAvatarPreview = (dataUrl) => {
+  if (!capitalAssetAvatarPreview) {
+    return;
+  }
+  if (dataUrl) {
+    capitalAssetAvatarPreview.innerHTML = `<img src="${dataUrl}" alt="Фото актива" />`;
+    capitalAssetAvatarRemove?.classList.remove("is-hidden");
+  } else {
+    capitalAssetAvatarPreview.innerHTML = `<span class="hint">Фото пока не выбрано</span>`;
+    capitalAssetAvatarRemove?.classList.add("is-hidden");
+  }
 };
 
 const capitalMonthKey = () => new Date().toISOString().slice(0, 7);
@@ -2848,6 +2894,7 @@ const capitalResetAssetForm = () => {
     capitalAssetAvatar.value = "";
   }
   capitalAssetAvatarDataUrl = "";
+  updateCapitalAssetAvatarPreview("");
   capitalEditingAssetId = null;
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
@@ -2878,6 +2925,7 @@ const capitalFillAssetForm = (asset) => {
     capitalAssetIcon.value = asset.icon || "";
   }
   capitalAssetAvatarDataUrl = asset.avatarDataUrl || "";
+  updateCapitalAssetAvatarPreview(capitalAssetAvatarDataUrl);
   capitalEditingAssetId = asset.id;
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
@@ -3442,6 +3490,17 @@ const resetForm = () => {
   }
 };
 
+const resetTransactionFormToAdd = () => {
+  if (!form) {
+    return;
+  }
+  form.reset();
+  renderCategoryOptions();
+  resetForm();
+  setTransactionFormMode("add");
+  updateTransactionFormState();
+};
+
 const transactionSubmitButton = form?.querySelector("button[type='submit']");
 
 const updateTransactionFormState = () => {
@@ -3453,6 +3512,28 @@ const updateTransactionFormState = () => {
   const amount = Number.parseFloat(document.getElementById("amount")?.value);
   const isValid = Boolean(date) && Boolean(category) && Number.isFinite(amount) && amount > 0;
   transactionSubmitButton.disabled = !isValid;
+};
+
+const populateTransactionForm = (transaction) => {
+  const dateInput = document.getElementById("date");
+  const typeInput = document.getElementById("type");
+  const amountInput = document.getElementById("amount");
+  const noteInput = document.getElementById("note");
+  if (!transaction || !dateInput || !typeInput || !amountInput || !noteInput) {
+    return;
+  }
+  typeInput.value = transaction.type;
+  renderCategoryOptions();
+  categorySelect.value = transaction.category;
+  updateSubcategoryOptions(transaction.category);
+  if (transaction.subcategory) {
+    ensureSubcategoryOption(transaction.subcategory);
+  } else {
+    subcategorySelect.value = "";
+  }
+  dateInput.value = transaction.date;
+  amountInput.value = transaction.amount;
+  noteInput.value = transaction.note || "";
 };
 
 const setView = (viewId) => {
@@ -3515,6 +3596,30 @@ const bindEvents = () => {
       }
 
       const now = new Date().toISOString();
+      if (editingTransactionId) {
+        const index = transactions.findIndex((item) => item.id === editingTransactionId);
+        if (index === -1) {
+          showError("Операция для редактирования не найдена.");
+          resetTransactionFormToAdd();
+          return;
+        }
+        const before = { ...transactions[index] };
+        const updated = touchTransaction(before, {
+          date,
+          type,
+          category,
+          subcategory,
+          amount,
+          note,
+        });
+        transactions[index] = updated;
+        recordUndo("editTx", { before, after: updated });
+        Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+        render(activeView);
+        resetTransactionFormToAdd();
+        return;
+      }
+
       transactions.push({
         id: generateId("tx"),
         date,
@@ -3528,9 +3633,8 @@ const bindEvents = () => {
       });
       recordUndo("addTx", { id: transactions[transactions.length - 1].id });
       Storage.set(STORAGE_KEY, JSON.stringify(transactions));
-      render();
-      resetForm();
-      updateTransactionFormState();
+      render(activeView);
+      resetTransactionFormToAdd();
     }, "добавление операции"));
     const formFields = form.querySelectorAll("input, select");
     formFields.forEach((field) => {
@@ -3538,6 +3642,10 @@ const bindEvents = () => {
       on(field, "change", updateTransactionFormState, "валидация формы");
     });
   }
+
+  on(transactionCancelButton, "click", () => {
+    resetTransactionFormToAdd();
+  }, "отмена редактирования");
 
 on(document.getElementById("type"), "change", () => {
   renderCategoryOptions();
@@ -3621,6 +3729,24 @@ on(undoButton, "click", undoLastAction, "undo");
       return;
     }
 
+    const action = target.dataset.action;
+    if (action === "edit") {
+      const transaction = transactions.find((item) => item.id === id);
+      if (!transaction) {
+        showError("Операция для редактирования не найдена.");
+        return;
+      }
+      setTransactionFormMode("edit", transaction);
+      populateTransactionForm(transaction);
+      updateTransactionFormState();
+      form?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (action !== "delete") {
+      return;
+    }
+
     const index = transactions.findIndex((item) => item.id === id);
     const deleted = transactions.find((item) => item.id === id);
     if (!deleted) {
@@ -3628,8 +3754,11 @@ on(undoButton, "click", undoLastAction, "undo");
     }
     transactions = transactions.filter((item) => item.id !== id);
     recordUndo("deleteTx", { item: deleted, index });
+    if (editingTransactionId === id) {
+      resetTransactionFormToAdd();
+    }
     Storage.set(STORAGE_KEY, JSON.stringify(transactions));
-    render();
+    render(activeView);
   }, "удаление операции");
 
 on(exportButton, "click", () => {
@@ -3760,6 +3889,7 @@ onAll(capitalTabs, "click", (event) => {
       return;
     }
     capitalAssetAvatarDataUrl = await compressImageToDataUrl(file);
+    updateCapitalAssetAvatarPreview(capitalAssetAvatarDataUrl);
   }, "avatar upload");
 
   on(capitalAssetAvatarRemove, "click", () => {
@@ -3767,6 +3897,7 @@ onAll(capitalTabs, "click", (event) => {
     if (capitalAssetAvatar) {
       capitalAssetAvatar.value = "";
     }
+    updateCapitalAssetAvatarPreview("");
   }, "avatar remove");
 
   on(document, "keydown", (event) => {
@@ -4195,9 +4326,11 @@ const initializeApp = safeExec(async () => {
   bindEvents();
   renderCategories();
   resetForm();
+  setTransactionFormMode("add");
   initializeReportRange();
   updateUndoState();
   updateTransactionFormState();
+  updateCapitalAssetAvatarPreview("");
   capitalSetTab("overview");
   setLayout(currentLayout);
   setView(activeView);
