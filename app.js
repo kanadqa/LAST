@@ -2442,19 +2442,19 @@ const renderCapitalAssets = () => {
     groupCard.className = "asset-group";
     groupCard.innerHTML = `
       <div class="asset-group-header">
-        <div>
-          <h4>${groupName}</h4>
-          <span class="asset-count">${groupAssets.length} актив(а)</span>
-        </div>
-        <button class="chip" data-action="toggle-group" data-group="${groupName}" aria-expanded="${isGroupOpen}">
-          ${isGroupOpen ? "Свернуть" : "Развернуть"}
-        </button>
-        <div class="asset-group-totals">
-          <strong>${capitalFormatMoney(totalsGroup.amount)}</strong>
-          <span class="asset-profit ${groupMeta.profit < 0 ? "is-negative" : ""}">
-            ${capitalFormatMoney(groupMeta.profit)}
+        <button class="asset-group-toggle" data-action="toggle-group" data-group="${groupName}" aria-expanded="${isGroupOpen}" type="button">
+          <span>
+            <h4>${groupName}</h4>
+            <span class="asset-count">${groupAssets.length} актив(а)</span>
           </span>
-        </div>
+          <span class="asset-group-totals">
+            <strong>${capitalFormatMoney(totalsGroup.amount)}</strong>
+            <span class="asset-profit ${groupMeta.profit < 0 ? "is-negative" : ""}">
+              ${capitalFormatMoney(groupMeta.profit)}
+            </span>
+          </span>
+          <span class="chevron">›</span>
+        </button>
       </div>
     `;
 
@@ -2470,19 +2470,19 @@ const renderCapitalAssets = () => {
       subSection.className = "asset-subgroup";
       subSection.innerHTML = `
         <div class="asset-subgroup-header">
-          <div>
-            <h5>${subcategoryName}</h5>
-            <span class="asset-count">${assets.length} актив(а)</span>
-          </div>
-          <button class="chip" data-action="toggle-subgroup" data-group="${groupName}" data-subgroup="${subcategoryName}" aria-expanded="${isSubOpen}">
-            ${isSubOpen ? "Свернуть" : "Развернуть"}
-          </button>
-          <div class="asset-group-totals">
-            <strong>${capitalFormatMoney(totalsSub.amount)}</strong>
-            <span class="asset-profit ${subMeta.profit < 0 ? "is-negative" : ""}">
-              ${capitalFormatMoney(subMeta.profit)}
+          <button class="asset-subgroup-toggle" data-action="toggle-subgroup" data-group="${groupName}" data-subgroup="${subcategoryName}" aria-expanded="${isSubOpen}" type="button">
+            <span>
+              <h5>${subcategoryName}</h5>
+              <span class="asset-count">${assets.length} актив(а)</span>
             </span>
-          </div>
+            <span class="asset-group-totals">
+              <strong>${capitalFormatMoney(totalsSub.amount)}</strong>
+              <span class="asset-profit ${subMeta.profit < 0 ? "is-negative" : ""}">
+                ${capitalFormatMoney(subMeta.profit)}
+              </span>
+            </span>
+            <span class="chevron">›</span>
+          </button>
         </div>
       `;
 
@@ -2536,7 +2536,7 @@ const renderCapitalAssets = () => {
         card.className = "asset-item";
         card.dataset.assetId = asset.id;
         card.innerHTML = `
-          <div class="asset-item-main" data-action="toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="${detailId}">
+          <div class="asset-row" data-action="toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="${detailId}">
             <span class="asset-avatar">${avatarMarkup}</span>
             <span class="asset-main">
               <span class="asset-title">${asset.name}</span>
@@ -2553,7 +2553,6 @@ const renderCapitalAssets = () => {
                 ${percentLabel}
               </span>
               ${expectedMarkup}
-              ${showPercentWarning ? "<span class='asset-warning'>проверь данные</span><span class='chip chip-warning'>проверить</span>" : ""}
             </span>
             <span class="chip chip-liquidity">${liquidityLabel}</span>
             <span class="asset-quick-actions">
@@ -2562,40 +2561,31 @@ const renderCapitalAssets = () => {
             </span>
             <span class="chevron">›</span>
           </div>
-          <div id="${detailId}" class="asset-details">
-            <div class="asset-detail-grid">
-              <div class="asset-detail-row">
-                <span>Дата окончания</span>
-                <strong>${asset.maturityDate || "—"}</strong>
-              </div>
-              <div class="asset-detail-row">
-                <span>Потенц. доходность</span>
-                <strong>${
-                  asset.expectedProfit != null && asset.expectedProfit !== ""
-                    ? expectedData.value == null && expectedData.missing
-                      ? `нет курса для ${asset.currency}`
-                      : expectedData.value == null && expectedRaw == null
-                        ? "—"
-                        : `${capitalFormatMoney(expectedData.value ?? expectedRaw)}${
-                          asset.currency !== capitalState.settings.baseCurrency && expectedData.value != null && expectedRaw != null
-                            ? ` (${expectedRaw.toFixed(2)} ${asset.currency})`
-                            : ""
-                        }`
-                    : "—"
-                }</strong>
-              </div>
-              <div class="asset-detail-row">
-                <span>Комментарий</span>
-                <strong>${asset.note || "—"}</strong>
-              </div>
-              <div class="asset-detail-row">
-                <span>Валюта</span>
-                <strong>${asset.currency}</strong>
-              </div>
-            </div>
-            <div class="asset-detail-actions">
+          <div id="${detailId}" class="asset-details" hidden>
+            <div class="k">Дата окончания</div>
+            <div class="v">${asset.maturityDate || "—"}</div>
+            <div class="k">Потенц. доходность</div>
+            <div class="v">${
+              asset.expectedProfit != null && asset.expectedProfit !== ""
+                ? expectedData.value == null && expectedData.missing
+                  ? `нет курса для ${asset.currency}`
+                  : expectedData.value == null && expectedRaw == null
+                    ? "—"
+                    : `${capitalFormatMoney(expectedData.value ?? expectedRaw)}${
+                      asset.currency !== capitalState.settings.baseCurrency && expectedData.value != null && expectedRaw != null
+                        ? ` (${expectedRaw.toFixed(2)} ${asset.currency})`
+                        : ""
+                    }`
+                : "—"
+            }</div>
+            <div class="k">Комментарий</div>
+            <div class="v">${asset.note || "—"}</div>
+            <div class="k">Валюта</div>
+            <div class="v">${asset.currency}</div>
+            <div class="asset-details-actions">
               <button class="button secondary" data-action="edit-asset" data-id="${asset.id}">Редактировать</button>
               <button class="button danger" data-action="delete-asset" data-id="${asset.id}">Удалить</button>
+              ${showPercentWarning ? "<span class='chip chip-warning'>проверь данные</span>" : ""}
             </div>
           </div>
         `;
@@ -2939,21 +2929,14 @@ const capitalSetAssetDrawer = (isOpen) => {
 };
 
 const capitalSetAssetModal = (isOpen) => {
-  if (!capitalAssetDrawer) {
-    return;
-  }
-  capitalAssetDrawer.classList.toggle("is-modal", isOpen);
   if (capitalAssetOverlay) {
-    capitalAssetOverlay.classList.toggle("is-active", isOpen);
+    capitalAssetOverlay.classList.toggle("is-open", isOpen);
   }
   document.body.classList.toggle("modal-open", isOpen);
-  if (!isOpen) {
-    capitalAssetDrawer.setAttribute("aria-hidden", "true");
-  }
 };
 
 const capitalIsAssetModalOpen = () =>
-  capitalAssetDrawer ? capitalAssetDrawer.classList.contains("is-modal") : false;
+  capitalAssetDrawer ? capitalAssetDrawer.classList.contains("is-open") : false;
 
 const capitalUpdateAsset = (id, field, value) => {
   const asset = capitalState.assets.find((item) => item.id === id);
@@ -4234,7 +4217,7 @@ onAll(capitalTabs, "click", (event) => {
       if (detailsId) {
         const details = document.getElementById(detailsId);
         if (details) {
-          details.classList.toggle("is-open", !isExpanded);
+          details.hidden = isExpanded;
         }
       }
       return;
