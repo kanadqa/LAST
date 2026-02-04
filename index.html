@@ -38,6 +38,7 @@
 
     <div class="app-content">
       <div id="errorBanner" class="error-banner is-hidden" role="alert"></div>
+      <div id="selfTestPanel" class="selftest-panel is-hidden"></div>
       <header class="topbar">
         <div>
           <h2 id="viewTitle">Обзор</h2>
@@ -526,6 +527,7 @@
                 Фото
                 <input type="file" id="capitalAssetAvatar" accept="image/*" />
               </label>
+              <button id="capitalAssetAvatarRemove" type="button" class="button secondary small">Удалить фото</button>
               <label>
                 Подкатегория
                 <input type="text" id="capitalAssetSubcategory" list="capitalSubcategoryList" placeholder="Например, Сбербанк" />

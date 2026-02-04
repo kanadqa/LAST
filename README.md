@@ -42,7 +42,21 @@
 
 ## Где хранятся данные
 
-Все данные хранятся в IndexedDB (ключи `budget.transactions.v2`, `budget.categories.v3`, `budget.capital.v2`, `budget.view.active`, `budget.layout`). При необходимости выполняется миграция из старых форматов.
+Все данные хранятся в IndexedDB (ключи `budget.transactions.v2`, `budget.categories.v3`, `budget.capital.v2`, `budget.view.active`, `budget.layout`, `budget.capital.assets.uiState`). При необходимости выполняется миграция из старых форматов.
+
+## Фото и иконки активов
+
+В модальном окне актива можно указать emoji-иконку или загрузить фото. Фото автоматически уменьшается до 96×96 и сохраняется в `avatarDataUrl` (dataURL). Если фото не задано, показывается emoji, а если emoji отсутствует — системная иконка по типу.
+
+## Selftest режим
+
+Для самопроверки откройте приложение с параметром `?selftest=1`. Пример:
+
+```
+http://localhost:8000/index.html?view=capital&selftest=1
+```
+
+Результаты тестов появятся в консоли и в небольшом блоке на странице.
 
 ## Запуск локального сервера
 

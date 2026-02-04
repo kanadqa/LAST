@@ -92,6 +92,7 @@ const capitalAssetInvested = document.getElementById("capitalAssetInvested");
 const capitalAssetSubcategory = document.getElementById("capitalAssetSubcategory");
 const capitalAssetIcon = document.getElementById("capitalAssetIcon");
 const capitalAssetAvatar = document.getElementById("capitalAssetAvatar");
+const capitalAssetAvatarRemove = document.getElementById("capitalAssetAvatarRemove");
 const capitalSubcategoryList = document.getElementById("capitalSubcategoryList");
 const capitalAssetMaturityDate = document.getElementById("capitalAssetMaturityDate");
 const capitalAssetLiquidity = document.getElementById("capitalAssetLiquidity");
@@ -101,6 +102,7 @@ const capitalAssetClose = document.getElementById("capitalAssetClose");
 const capitalAssetDelete = document.getElementById("capitalAssetDelete");
 const capitalAssetDrawerTitle = document.getElementById("capitalAssetDrawerTitle");
 const toast = document.getElementById("toast");
+const selfTestPanel = document.getElementById("selfTestPanel");
 const capitalAssetsList = document.getElementById("capitalAssetsList");
 const capitalAssetSearch = document.getElementById("capitalAssetSearch");
 const capitalAssetTypeFilter = document.getElementById("capitalAssetTypeFilter");
@@ -154,6 +156,7 @@ const CHART_LIMIT = 6;
 const CAPITAL_KEY_V2 = "budget.capital.v2";
 const CAPITAL_KEY_V1 = "budget.capital.v1";
 const CAPITAL_MIGRATED_KEY = "budget.capital.migrated";
+const CAPITAL_ASSETS_UI_KEY = "budget.capital.assets.uiState";
 
 const showError = (message) => {
   if (!errorBanner) {
@@ -535,6 +538,9 @@ const assetFilters = {
   direction: "desc",
 };
 let capitalAssetAvatarDataUrl = "";
+let assetUiState = { groups: {}, subgroups: {} };
+
+const persistAssetUiState = () => Storage.set(CAPITAL_ASSETS_UI_KEY, JSON.stringify(assetUiState));
 
 const capitalIsUnconvertible = (asset) =>
   asset.currency !== capitalState?.settings?.baseCurrency
@@ -555,8 +561,9 @@ const sanitizeNumber = (value, fallback = 0) => {
 
 const normalizeCapitalState = () => {
   if (!capitalState) {
-    return;
+    return false;
   }
+  let migrated = false;
   capitalState.settings = capitalState.settings || { baseCurrency: "RUB", fxRates: {} };
   capitalState.settings.baseCurrency = normalizeCurrency(capitalState.settings.baseCurrency, "RUB");
   capitalState.settings.fxRates = capitalState.settings.fxRates || {};
@@ -577,8 +584,13 @@ const normalizeCapitalState = () => {
     const currency = normalizeCurrency(asset.currency, capitalState.settings.baseCurrency);
     const amount = sanitizeNumber(asset.amount);
     const invested = sanitizeNumber(asset.invested ?? amount);
+    const createdAt = asset.createdAt || asset.updatedAt || new Date().toISOString();
+    if (!asset.id || !asset.updatedAt || !asset.createdAt) {
+      migrated = true;
+    }
     return {
       id: asset.id || generateId("asset"),
+      createdAt,
       updatedAt: asset.updatedAt || new Date().toISOString(),
       section: asset.section || (isDeposit ? "Вклады" : "В наличии"),
       category: asset.category || categoryFallback,
@@ -616,6 +628,7 @@ const normalizeCapitalState = () => {
   }
   capitalState.debts = (capitalState.debts || []).map((debt) => ({
     id: debt.id || generateId("debt"),
+    createdAt: debt.createdAt || debt.updatedAt || new Date().toISOString(),
     updatedAt: debt.updatedAt || new Date().toISOString(),
     currency: normalizeCurrency(debt.currency, capitalState.settings.baseCurrency),
     principal: sanitizeNumber(debt.principal),
@@ -625,6 +638,7 @@ const normalizeCapitalState = () => {
   }));
   capitalState.goals = (capitalState.goals || []).map((goal) => ({
     id: goal.id || generateId("goal"),
+    createdAt: goal.createdAt || goal.updatedAt || new Date().toISOString(),
     updatedAt: goal.updatedAt || new Date().toISOString(),
     targetAmount: sanitizeNumber(goal.targetAmount, 0),
     baselineAmount: goal.baselineAmount === null ? null : sanitizeNumber(goal.baselineAmount, null),
@@ -632,6 +646,7 @@ const normalizeCapitalState = () => {
   }));
   capitalState.snapshots = (capitalState.snapshots || []).map((snap) => ({
     id: snap.id || generateId("snapshot"),
+    createdAt: snap.createdAt || snap.updatedAt || new Date().toISOString(),
     updatedAt: snap.updatedAt || new Date().toISOString(),
     assetsTotal: sanitizeNumber(snap.assetsTotal, 0),
     debtsTotal: sanitizeNumber(snap.debtsTotal, 0),
@@ -639,6 +654,7 @@ const normalizeCapitalState = () => {
     delta: sanitizeNumber(snap.delta, 0),
     ...snap,
   }));
+  return migrated;
 };
 
 normalizeCapitalState();
@@ -1313,6 +1329,120 @@ const showToast = (message) => {
   showToast._timer = setTimeout(() => {
     toast.classList.add("is-hidden");
   }, 2200);
+};
+
+const renderSelfTestPanel = (results) => {
+  if (!selfTestPanel) {
+    return;
+  }
+  selfTestPanel.classList.remove("is-hidden");
+  selfTestPanel.innerHTML = `
+    <strong>Self-test</strong>
+    <ul>
+      ${results.map((item) => `<li>${item.pass ? "✅" : "❌"} ${item.name}</li>`).join("")}
+    </ul>
+  `;
+};
+
+const selfTest = async () => {
+  const results = [];
+  const record = (name, pass) => results.push({ name, pass });
+  const originalPayload = buildBackupPayload();
+  try {
+    const baseCurrency = capitalState.settings.baseCurrency;
+    const testAssetId = capitalGenerateId("asset");
+    capitalState.assets.push({
+      id: testAssetId,
+      name: "QA Актив",
+      type: "cash",
+      currency: baseCurrency,
+      amount: 1000,
+      invested: 900,
+      section: "В наличии",
+      category: "Наличные",
+      subcategory: "QA",
+      liquidity: "high",
+      expectedProfit: null,
+      maturityDate: "",
+      note: "selftest",
+      icon: "🧪",
+      avatarDataUrl: "",
+      createdAt: capitalNowIso(),
+      updatedAt: capitalNowIso(),
+    });
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Добавление актива", Boolean(capitalState.assets.find((a) => a.id === testAssetId)));
+
+    const asset = capitalState.assets.find((a) => a.id === testAssetId);
+    if (asset) {
+      asset.name = "QA Актив (редакт.)";
+      asset.updatedAt = capitalNowIso();
+    }
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Редактирование актива", Boolean(capitalState.assets.find((a) => a.name.includes("редакт"))));
+
+    assetFilters.search = "QA";
+    renderCapitalAssets();
+    const displayed = capitalAssetsList?.querySelectorAll(".asset-item").length || 0;
+    record("Фильтр/сортировка", displayed >= 1);
+    assetFilters.search = "";
+    renderCapitalAssets();
+
+    capitalState.assets = capitalState.assets.filter((a) => a.id !== testAssetId);
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Удаление актива", !capitalState.assets.find((a) => a.id === testAssetId));
+
+    const backup = buildBackupPayload();
+    await applyBackupPayload(backup);
+    record("Backup/restore", true);
+  } catch (error) {
+    console.error("Selftest failed", error);
+    record("Selftest runtime", false);
+  } finally {
+    await applyBackupPayload(originalPayload);
+    renderCapitalView();
+  }
+  console.table(results);
+  renderSelfTestPanel(results);
+};
+
+const dataUrlSizeBytes = (dataUrl) => {
+  const base64 = dataUrl.split(",")[1] || "";
+  return Math.ceil((base64.length * 3) / 4);
+};
+
+const compressImageToDataUrl = async (file) => {
+  const bitmap = await createImageBitmap(file);
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return "";
+  }
+  const scale = Math.max(size / bitmap.width, size / bitmap.height);
+  const width = bitmap.width * scale;
+  const height = bitmap.height * scale;
+  const dx = (size - width) / 2;
+  const dy = (size - height) / 2;
+  ctx.drawImage(bitmap, dx, dy, width, height);
+
+  const formats = ["image/webp", "image/jpeg"];
+  for (const format of formats) {
+    let quality = 0.8;
+    while (quality >= 0.5) {
+      const dataUrl = canvas.toDataURL(format, quality);
+      if (dataUrlSizeBytes(dataUrl) <= 150 * 1024) {
+        return dataUrl;
+      }
+      quality -= 0.1;
+    }
+  }
+  return canvas.toDataURL("image/jpeg", 0.5);
 };
 
 const capitalMonthKey = () => new Date().toISOString().slice(0, 7);
@@ -2148,6 +2278,7 @@ const renderCapitalAssets = () => {
     const groupAssets = [...subcategories.values()].flat();
     const totalsGroup = renderGroupTotals(groupAssets);
     const groupMeta = getProfitMeta(totalsGroup.amount, totalsGroup.invested);
+    const isGroupOpen = assetUiState.groups[groupName] ?? true;
     const groupCard = document.createElement("div");
     groupCard.className = "asset-group";
     groupCard.innerHTML = `
@@ -2156,6 +2287,9 @@ const renderCapitalAssets = () => {
           <h4>${groupName}</h4>
           <span class="asset-count">${groupAssets.length} актив(а)</span>
         </div>
+        <button class="chip" data-action="toggle-group" data-group="${groupName}" aria-expanded="${isGroupOpen}">
+          ${isGroupOpen ? "Свернуть" : "Развернуть"}
+        </button>
         <div class="asset-group-totals">
           <strong>${capitalFormatMoney(totalsGroup.amount)}</strong>
           <span class="asset-profit ${groupMeta.profit < 0 ? "is-negative" : ""}">
@@ -2165,9 +2299,14 @@ const renderCapitalAssets = () => {
       </div>
     `;
 
+    const subgroupContainer = document.createElement("div");
+    subgroupContainer.className = `asset-subgroup-list${isGroupOpen ? "" : " is-collapsed"}`;
+
     subcategories.forEach((assets, subcategoryName) => {
       const totalsSub = renderGroupTotals(assets);
       const subMeta = getProfitMeta(totalsSub.amount, totalsSub.invested);
+      const subKey = `${groupName}::${subcategoryName}`;
+      const isSubOpen = assetUiState.subgroups[subKey] ?? true;
       const subSection = document.createElement("div");
       subSection.className = "asset-subgroup";
       subSection.innerHTML = `
@@ -2176,6 +2315,9 @@ const renderCapitalAssets = () => {
             <h5>${subcategoryName}</h5>
             <span class="asset-count">${assets.length} актив(а)</span>
           </div>
+          <button class="chip" data-action="toggle-subgroup" data-group="${groupName}" data-subgroup="${subcategoryName}" aria-expanded="${isSubOpen}">
+            ${isSubOpen ? "Свернуть" : "Развернуть"}
+          </button>
           <div class="asset-group-totals">
             <strong>${capitalFormatMoney(totalsSub.amount)}</strong>
             <span class="asset-profit ${subMeta.profit < 0 ? "is-negative" : ""}">
@@ -2186,7 +2328,7 @@ const renderCapitalAssets = () => {
       `;
 
       const list = document.createElement("div");
-      list.className = "asset-items";
+      list.className = `asset-items${isSubOpen ? "" : " is-collapsed"}`;
 
       assets.forEach((asset) => {
         const amountBase = assetValueInBase(asset, "amount");
@@ -2202,6 +2344,7 @@ const renderCapitalAssets = () => {
           ? "—"
           : capitalFormatMoney(profitMeta.profit);
         const percentLabel = profitMeta.percent == null ? "—" : `${profitMeta.percent.toFixed(1)}%`;
+        const showPercentWarning = profitMeta.percent == null && hasRate;
         const liquidityLabel = capitalLiquidityShort(asset.liquidity);
         const iconLetter = (asset.name || "?").trim().charAt(0).toUpperCase();
         const iconValue = asset.icon || capitalDefaultIcon(asset.type);
@@ -2209,12 +2352,14 @@ const renderCapitalAssets = () => {
           ? `<img src="${asset.avatarDataUrl}" alt="" />`
           : `<span>${iconValue || iconLetter}</span>`;
         const detailId = `asset-details-${asset.id}`;
+        const hasRate = amountBase != null && investedBase != null;
+        const missingRateChip = hasRate ? "" : "<span class='chip chip-missing'>нет курса</span>";
 
         const card = document.createElement("div");
         card.className = "asset-item";
         card.dataset.assetId = asset.id;
         card.innerHTML = `
-          <button class="asset-item-main" data-action="toggle" aria-expanded="false" aria-controls="${detailId}">
+          <div class="asset-item-main" data-action="toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="${detailId}">
             <span class="asset-avatar">${avatarMarkup}</span>
             <span class="asset-main">
               <span class="asset-title">${asset.name}</span>
@@ -2223,17 +2368,22 @@ const renderCapitalAssets = () => {
             <span class="asset-values">
               <span class="asset-amount">${amountLabel}</span>
               <span class="asset-invested">вложено ${investedLabel}</span>
+              ${missingRateChip}
             </span>
             <span class="asset-profit-block">
               <span class="asset-profit ${profitMeta.profit < 0 ? "is-negative" : ""}">${profitLabel}</span>
-              <span class="asset-profit-percent ${profitMeta.percent == null ? "is-warning" : ""}">
+              <span class="asset-profit-percent ${showPercentWarning ? "is-warning" : ""}">
                 ${percentLabel}
               </span>
-              ${profitMeta.percent == null ? "<span class='asset-warning'>проверь данные</span><span class='chip chip-warning'>проверить</span>" : ""}
+              ${showPercentWarning ? "<span class='asset-warning'>проверь данные</span><span class='chip chip-warning'>проверить</span>" : ""}
             </span>
             <span class="chip chip-liquidity">${liquidityLabel}</span>
+            <span class="asset-quick-actions">
+              <button class="chip" data-action="edit-asset" data-id="${asset.id}" type="button" aria-label="Редактировать">✎</button>
+              <button class="chip danger" data-action="delete-asset" data-id="${asset.id}" type="button" aria-label="Удалить">🗑</button>
+            </span>
             <span class="chevron">›</span>
-          </button>
+          </div>
           <div id="${detailId}" class="asset-details">
             <div class="asset-detail-grid">
               <div class="asset-detail-row">
@@ -2263,9 +2413,10 @@ const renderCapitalAssets = () => {
       });
 
       subSection.appendChild(list);
-      groupCard.appendChild(subSection);
+      subgroupContainer.appendChild(subSection);
     });
 
+    groupCard.appendChild(subgroupContainer);
     capitalAssetsList.appendChild(groupCard);
   });
 };
@@ -2791,6 +2942,7 @@ const capitalAddAsset = () => {
     capitalState.assets.push({
       id: capitalGenerateId("asset"),
       ...payload,
+      createdAt: capitalNowIso(),
       updatedAt: capitalNowIso(),
     });
     ensureFxRateForCurrency(capitalState.assets[capitalState.assets.length - 1].currency);
@@ -2804,6 +2956,7 @@ const capitalAddAsset = () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
   }
+  showToast("Сохранено");
   renderCapitalView();
 };
 
@@ -3601,35 +3754,20 @@ onAll(capitalTabs, "click", (event) => {
     capitalResetAssetForm();
   }, "overlay asset");
 
-  on(capitalAssetAvatar, "change", (event) => {
+  on(capitalAssetAvatar, "change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const size = 96;
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          return;
-        }
-        const scale = Math.max(size / img.width, size / img.height);
-        const width = img.width * scale;
-        const height = img.height * scale;
-        const dx = (size - width) / 2;
-        const dy = (size - height) / 2;
-        ctx.drawImage(img, dx, dy, width, height);
-        capitalAssetAvatarDataUrl = canvas.toDataURL("image/png");
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
+    capitalAssetAvatarDataUrl = await compressImageToDataUrl(file);
   }, "avatar upload");
+
+  on(capitalAssetAvatarRemove, "click", () => {
+    capitalAssetAvatarDataUrl = "";
+    if (capitalAssetAvatar) {
+      capitalAssetAvatar.value = "";
+    }
+  }, "avatar remove");
 
   on(document, "keydown", (event) => {
     if (event.key !== "Escape") {
@@ -3651,6 +3789,7 @@ onAll(capitalTabs, "click", (event) => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
+    showToast("Актив удален");
     renderCapitalView();
   }, "удаление актива");
 
@@ -3813,6 +3952,28 @@ onAll(capitalTabs, "click", (event) => {
       return;
     }
 
+    if (action === "toggle-group") {
+      const groupName = actionButton.dataset.group;
+      if (groupName) {
+        assetUiState.groups[groupName] = !(assetUiState.groups[groupName] ?? true);
+        persistAssetUiState();
+        renderCapitalAssets();
+      }
+      return;
+    }
+
+    if (action === "toggle-subgroup") {
+      const groupName = actionButton.dataset.group;
+      const subName = actionButton.dataset.subgroup;
+      if (groupName && subName) {
+        const key = `${groupName}::${subName}`;
+        assetUiState.subgroups[key] = !(assetUiState.subgroups[key] ?? true);
+        persistAssetUiState();
+        renderCapitalAssets();
+      }
+      return;
+    }
+
     if (!assetId) {
       return;
     }
@@ -3834,9 +3995,21 @@ onAll(capitalTabs, "click", (event) => {
       }
       capitalState.assets = capitalState.assets.filter((item) => item.id !== assetId);
       saveCapitalV2(capitalState);
+      showToast("Актив удален");
       renderCapitalView();
     }
   }, "действия по активу");
+
+  on(capitalAssetsList, "keydown", (event) => {
+    const target = event.target.closest("[data-action='toggle']");
+    if (!target) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      target.click();
+    }
+  }, "toggle details");
 
   on(capitalDebtForm, "submit", (event) => {
     event.preventDefault();
@@ -3995,10 +4168,21 @@ const loadState = async () => {
   transactions = await loadTransactions();
   categories = await loadCategories();
   capitalState = await migrateCapitalState();
-  normalizeCapitalState();
+  const capitalMigrated = normalizeCapitalState();
+  if (capitalMigrated) {
+    await saveCapitalV2(capitalState);
+  }
 
   const savedView = await Storage.get(VIEW_KEY);
   const savedLayout = await Storage.get(LAYOUT_KEY);
+  const savedUiState = await Storage.get(CAPITAL_ASSETS_UI_KEY);
+  if (savedUiState) {
+    try {
+      assetUiState = JSON.parse(savedUiState);
+    } catch (error) {
+      assetUiState = { groups: {}, subgroups: {} };
+    }
+  }
   const urlView = new URLSearchParams(window.location.search).get("view");
   activeView = urlView || savedView || "dashboard";
   currentLayout = savedLayout || "comfort";
@@ -4017,6 +4201,9 @@ const initializeApp = safeExec(async () => {
   capitalSetTab("overview");
   setLayout(currentLayout);
   setView(activeView);
+  if (new URLSearchParams(window.location.search).get("selftest") === "1") {
+    await selfTest();
+  }
 }, "инициализация приложения");
 
 if (document.readyState === "loading") {
