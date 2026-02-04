@@ -1106,8 +1106,48 @@ td {
   gap: 6px;
 }
 
+.asset-summary-card.total {
+  border-left: 4px solid #94a3b8;
+}
+
+.asset-summary-card.invested {
+  border-left: 4px solid #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.asset-summary-card.profit {
+  border-left: 4px solid #16a34a;
+  background: rgba(22, 163, 74, 0.06);
+}
+
+.asset-summary-card.profit.is-negative {
+  border-left-color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.asset-summary-card.expected {
+  border-left: 4px solid #0ea5e9;
+  background: rgba(14, 165, 233, 0.08);
+}
+
 .asset-summary-card strong {
   font-size: 18px;
+}
+
+.asset-summary-card.invested strong {
+  color: #2563eb;
+}
+
+.asset-summary-card.profit strong {
+  color: #16a34a;
+}
+
+.asset-summary-card.profit.is-negative strong {
+  color: #dc2626;
+}
+
+.asset-summary-card.expected strong {
+  color: #0ea5e9;
 }
 
 .asset-summary-percent {
@@ -1117,6 +1157,10 @@ td {
 
 .asset-summary-percent.is-warning {
   color: #b45309;
+}
+
+.asset-summary-percent.is-info {
+  color: #2563eb;
 }
 
 .asset-groups {
@@ -1268,6 +1312,12 @@ td {
   display: grid;
   gap: 4px;
   text-align: right;
+}
+
+.asset-expected {
+  font-size: 12px;
+  color: #0ea5e9;
+  font-weight: 600;
 }
 
 .asset-quick-actions {

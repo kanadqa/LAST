@@ -96,7 +96,6 @@ const capitalAssetIcon = document.getElementById("capitalAssetIcon");
 const capitalAssetAvatar = document.getElementById("capitalAssetAvatar");
 const capitalAssetAvatarRemove = document.getElementById("capitalAssetAvatarRemove");
 const capitalAssetAvatarPreview = document.getElementById("capitalAssetAvatarPreview");
-const capitalSubcategoryList = document.getElementById("capitalSubcategoryList");
 const capitalAssetMaturityDate = document.getElementById("capitalAssetMaturityDate");
 const capitalAssetLiquidity = document.getElementById("capitalAssetLiquidity");
 const capitalAssetExpectedProfit = document.getElementById("capitalAssetExpectedProfit");
@@ -118,6 +117,8 @@ const capitalAssetsSummaryInvested = document.getElementById("capitalAssetsSumma
 const capitalAssetsSummaryProfit = document.getElementById("capitalAssetsSummaryProfit");
 const capitalAssetsSummaryPercent = document.getElementById("capitalAssetsSummaryPercent");
 const capitalAssetsSummaryWarning = document.getElementById("capitalAssetsSummaryWarning");
+const capitalAssetsSummaryExpected = document.getElementById("capitalAssetsSummaryExpected");
+const capitalAssetsSummaryExpectedNote = document.getElementById("capitalAssetsSummaryExpectedNote");
 const capitalAssetViewButtons = document.querySelectorAll("[data-capital-asset-view]");
 const capitalAssetPanels = document.querySelectorAll("[data-capital-asset-panel]");
 const capitalCategoryForm = document.getElementById("capitalCategoryForm");
@@ -563,6 +564,24 @@ const sanitizeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const formatSnapshotMonth = (date) => date.toISOString().slice(0, 7);
+
+const normalizeSnapshotMonth = (snapshot) => {
+  const raw = snapshot?.month;
+  if (typeof raw === "string" && /^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  const candidate = snapshot?.createdAt || snapshot?.updatedAt;
+  const date = candidate ? new Date(candidate) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return formatSnapshotMonth(new Date());
+  }
+  return formatSnapshotMonth(date);
+};
+
+const compareSnapshotMonth = (a, b, direction = 1) =>
+  direction * String(a?.month || "").localeCompare(String(b?.month || ""));
+
 const normalizeCapitalState = () => {
   if (!capitalState) {
     return false;
@@ -648,16 +667,23 @@ const normalizeCapitalState = () => {
     baselineAmount: goal.baselineAmount === null ? null : sanitizeNumber(goal.baselineAmount, null),
     ...goal,
   }));
-  capitalState.snapshots = (capitalState.snapshots || []).map((snap) => ({
-    id: snap.id || generateId("snapshot"),
-    createdAt: snap.createdAt || snap.updatedAt || new Date().toISOString(),
-    updatedAt: snap.updatedAt || new Date().toISOString(),
-    assetsTotal: sanitizeNumber(snap.assetsTotal, 0),
-    debtsTotal: sanitizeNumber(snap.debtsTotal, 0),
-    netWorth: sanitizeNumber(snap.netWorth, 0),
-    delta: sanitizeNumber(snap.delta, 0),
-    ...snap,
-  }));
+  capitalState.snapshots = (capitalState.snapshots || []).map((snap) => {
+    const normalizedMonth = normalizeSnapshotMonth(snap);
+    if (!snap.month || snap.month !== normalizedMonth) {
+      migrated = true;
+    }
+    return {
+      id: snap.id || generateId("snapshot"),
+      createdAt: snap.createdAt || snap.updatedAt || new Date().toISOString(),
+      updatedAt: snap.updatedAt || new Date().toISOString(),
+      assetsTotal: sanitizeNumber(snap.assetsTotal, 0),
+      debtsTotal: sanitizeNumber(snap.debtsTotal, 0),
+      netWorth: sanitizeNumber(snap.netWorth, 0),
+      delta: sanitizeNumber(snap.delta, 0),
+      ...snap,
+      month: normalizedMonth,
+    };
+  });
   return migrated;
 };
 
@@ -1504,7 +1530,7 @@ const capitalToBase = (value, currency) => {
   return value * rate;
 };
 
-const capitalFxEndpoint = "https://api.exchangerate.host";
+const capitalFxEndpoint = "https://api.frankfurter.dev/v1";
 
 const capitalFetchRate = async (base, currency) => {
   const url = `${capitalFxEndpoint}/latest?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}`;
@@ -1517,7 +1543,7 @@ const capitalFetchRate = async (base, currency) => {
   if (!rate) {
     throw new Error("No rate");
   }
-  return rate;
+  return { rate, date: data?.date };
 };
 
 const capitalFetchSeries = async (base, currency) => {
@@ -1526,13 +1552,13 @@ const capitalFetchSeries = async (base, currency) => {
   start.setDate(end.getDate() - 29);
   const startDate = start.toISOString().slice(0, 10);
   const endDate = end.toISOString().slice(0, 10);
-  const url = `${capitalFxEndpoint}/timeseries?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}&start_date=${startDate}&end_date=${endDate}`;
+  const url = `${capitalFxEndpoint}/${startDate}..${endDate}?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error("FX series fetch failed");
   }
   const data = await response.json();
-  const entries = Object.entries(data?.rates || {}).sort(([a], [b]) => a.localeCompare(b));
+  const entries = Object.entries(data?.rates || {}).sort(([a], [b]) => String(a).localeCompare(String(b)));
   return entries.map(([date, rates]) => ({ date, value: rates[currency] })).filter((item) => item.value);
 };
 
@@ -1588,18 +1614,19 @@ const refreshFxRate = async () => {
   }
   capitalFxNote.textContent = "Загружаем курс...";
   try {
-    const rate = await capitalFetchRate(base, currency);
+    const { rate, date } = await capitalFetchRate(base, currency);
     capitalState.settings.baseCurrency = base;
     capitalState.settings.fxRates[currency] = rate;
     saveCapitalV2(capitalState);
     capitalFxRateValue.textContent = rate.toFixed(4);
-    capitalFxUpdated.textContent = `на ${new Date().toLocaleDateString("ru-RU")}`;
+    const updatedDate = date ? new Date(date) : new Date();
+    capitalFxUpdated.textContent = `на ${updatedDate.toLocaleDateString("ru-RU")}`;
     capitalFxNote.textContent = "";
     const series = await capitalFetchSeries(base, currency);
     renderFxChart(series);
     renderCapitalView();
   } catch (error) {
-    capitalFxNote.textContent = "Не удалось обновить курс. Проверьте соединение.";
+    capitalFxNote.textContent = "Не удалось обновить курс. Оставили последнее значение.";
   }
 };
 
@@ -1613,7 +1640,7 @@ const ensureFxRateForCurrency = async (currency) => {
     return;
   }
   try {
-    const rate = await capitalFetchRate(base, normalized);
+    const { rate } = await capitalFetchRate(base, normalized);
     capitalState.settings.fxRates[normalized] = rate;
     saveCapitalV2(capitalState);
   } catch (error) {
@@ -1682,7 +1709,7 @@ const capitalEnsureSnapshot = () => {
   const totals = capitalTotals();
   const last = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month))
+    .sort((a, b) => compareSnapshotMonth(a, b))
     .pop();
   const delta = last ? totals.netWorth - last.netWorth : 0;
   capitalState.snapshots.push({
@@ -1972,7 +1999,7 @@ const renderCapitalOverviewDashboard = () => {
   }
 
   if (capitalOverviewDelta) {
-    const sorted = capitalState.snapshots.slice().sort((a, b) => a.month.localeCompare(b.month));
+    const sorted = capitalState.snapshots.slice().sort((a, b) => compareSnapshotMonth(a, b));
     const last = sorted[sorted.length - 1];
     const prev = sorted[sorted.length - 2];
     if (last && prev && prev.netWorth) {
@@ -2041,7 +2068,10 @@ const renderCapitalOverviewDashboard = () => {
 
   if (capitalOverviewSnapshots) {
     capitalOverviewSnapshots.innerHTML = "";
-    const snapshots = capitalState.snapshots.slice().sort((a, b) => b.month.localeCompare(a.month)).slice(0, 4);
+    const snapshots = capitalState.snapshots
+      .slice()
+      .sort((a, b) => compareSnapshotMonth(a, b, -1))
+      .slice(0, 4);
     if (!snapshots.length) {
       capitalOverviewSnapshots.innerHTML = "<p class='hint'>Нет снимков капитала.</p>";
     } else {
@@ -2110,47 +2140,199 @@ const capitalEnsureCategory = (name, subcategory = "") => {
   }
 };
 
+const renameCapitalCategory = (oldName, newName) => {
+  const trimmed = newName.trim();
+  if (!trimmed || oldName === trimmed) {
+    return;
+  }
+  if (capitalState.assetCategories.some((category) => category.name === trimmed)) {
+    showError("Категория с таким названием уже существует.");
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === oldName);
+  if (!category) {
+    return;
+  }
+  category.name = trimmed;
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === oldName ? { ...asset, category: trimmed, updatedAt: capitalNowIso() } : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const deleteCapitalCategory = (categoryName) => {
+  if (!categoryName) {
+    return;
+  }
+  const remaining = capitalState.assetCategories.filter((category) => category.name !== categoryName);
+  if (!remaining.length) {
+    alert("Нужна хотя бы одна категория капитала.");
+    return;
+  }
+  const fallback = "Другое";
+  if (!remaining.some((category) => category.name === fallback)) {
+    remaining.push({ name: fallback, subs: [] });
+  }
+  capitalState.assetCategories = remaining;
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName
+      ? { ...asset, category: fallback, subcategory: "", updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const renameCapitalSubcategory = (categoryName, oldName, newName) => {
+  const trimmed = newName.trim();
+  if (!trimmed || oldName === trimmed) {
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  if (!category) {
+    return;
+  }
+  category.subs = category.subs.map((item) => (item === oldName ? trimmed : item));
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName && asset.subcategory === oldName
+      ? { ...asset, subcategory: trimmed, updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const deleteCapitalSubcategory = (categoryName, subName) => {
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  if (!category) {
+    return;
+  }
+  category.subs = category.subs.filter((item) => item !== subName);
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName && asset.subcategory === subName
+      ? { ...asset, subcategory: "", updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const updateCapitalSubcategoryOptions = (categoryName, selectedValue = "") => {
+  if (!capitalAssetSubcategory) {
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  capitalAssetSubcategory.innerHTML = "<option value=''>Без подкатегории</option>";
+  if (category?.subs?.length) {
+    category.subs.forEach((sub) => {
+      const option = document.createElement("option");
+      option.value = sub;
+      option.textContent = sub;
+      capitalAssetSubcategory.appendChild(option);
+    });
+  }
+  if (selectedValue && ![...capitalAssetSubcategory.options].some((option) => option.value === selectedValue)) {
+    const extra = document.createElement("option");
+    extra.value = selectedValue;
+    extra.textContent = selectedValue;
+    capitalAssetSubcategory.appendChild(extra);
+  }
+  capitalAssetSubcategory.value = selectedValue || "";
+};
+
 const renderCapitalCategories = () => {
   if (!capitalCategoryManager) {
     return;
   }
   capitalCategoryManager.innerHTML = "";
-  capitalSubcategoryList.innerHTML = "";
 
   const sorted = capitalizeAssetCategories();
   sorted.forEach((category) => {
+    const card = document.createElement("div");
+    card.className = "category-card";
+    card.dataset.category = category.name;
+
+    const header = document.createElement("div");
+    header.className = "category-card-header";
+
+    const title = document.createElement("div");
+    title.innerHTML = `<strong>${category.name}</strong><span>${category.subs.length} подкатегорий</span>`;
+
+    const actions = document.createElement("div");
+    actions.className = "category-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.className = "chip";
+    renameBtn.textContent = "Переименовать";
+    renameBtn.dataset.capitalCategoryAction = "rename";
+    renameBtn.dataset.category = category.name;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "chip danger";
+    deleteBtn.textContent = "Удалить";
+    deleteBtn.dataset.capitalCategoryAction = "delete";
+    deleteBtn.dataset.category = category.name;
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    header.appendChild(title);
+    header.appendChild(actions);
+
+    const list = document.createElement("div");
+    list.className = "subcategory-list";
+    list.dataset.category = category.name;
+
+    if (!category.subs.length) {
+      const empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = "Нет подкатегорий";
+      list.appendChild(empty);
+    }
+
     category.subs.forEach((sub) => {
-      const subOption = document.createElement("option");
-      subOption.value = sub;
-      capitalSubcategoryList.appendChild(subOption);
+      const row = document.createElement("div");
+      row.className = "subcategory-row";
+      row.dataset.category = category.name;
+      row.dataset.subcategory = sub;
+
+      const name = document.createElement("span");
+      name.textContent = sub;
+
+      const tools = document.createElement("div");
+      tools.className = "subcategory-tools";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "chip";
+      editBtn.textContent = "Редактировать";
+      editBtn.dataset.capitalSubcategoryAction = "rename";
+      editBtn.dataset.category = category.name;
+      editBtn.dataset.subcategory = sub;
+
+      const deleteBtnSub = document.createElement("button");
+      deleteBtnSub.className = "chip danger";
+      deleteBtnSub.textContent = "Удалить";
+      deleteBtnSub.dataset.capitalSubcategoryAction = "delete";
+      deleteBtnSub.dataset.category = category.name;
+      deleteBtnSub.dataset.subcategory = sub;
+
+      tools.appendChild(editBtn);
+      tools.appendChild(deleteBtnSub);
+
+      row.appendChild(name);
+      row.appendChild(tools);
+      list.appendChild(row);
     });
 
-    const card = document.createElement("div");
-    card.className = "capital-category-card";
-    card.innerHTML = `
-      <div class="capital-category-title">
-        <span>${category.name}</span>
-        <button class="button secondary" data-capital-category-delete="${category.name}">Удалить</button>
-      </div>
-    `;
-    const subs = document.createElement("div");
-    subs.className = "capital-category-subs";
-    if (!category.subs.length) {
-      subs.innerHTML = "<span class='hint'>Подкатегории не добавлены.</span>";
-    } else {
-      category.subs.forEach((sub) => {
-        const pill = document.createElement("span");
-        pill.className = "capital-subcategory";
-        pill.innerHTML = `
-          ${sub}
-          <button class="button secondary" data-capital-subcategory-delete="${category.name}" data-subcategory="${sub}">×</button>
-        `;
-        subs.appendChild(pill);
-      });
-    }
-    card.appendChild(subs);
+    card.appendChild(header);
+    card.appendChild(list);
     capitalCategoryManager.appendChild(card);
   });
+
+  const currentCategoryLabel = capitalTypeLabel(capitalAssetType?.value);
+  if (currentCategoryLabel) {
+    updateCapitalSubcategoryOptions(currentCategoryLabel, capitalAssetSubcategory?.value || "");
+  }
 };
 
 const renderCapitalAssets = () => {
@@ -2201,6 +2383,22 @@ const renderCapitalAssets = () => {
     return converted ?? value;
   };
 
+  const expectedValueInBase = (asset) => {
+    const raw = asset.expectedProfit;
+    if (raw == null || raw === "") {
+      return { value: null, missing: false };
+    }
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+      return { value: null, missing: false };
+    }
+    const converted = capitalToBase(parsed, asset.currency);
+    if (converted == null && capitalIsUnconvertible(asset)) {
+      return { value: null, missing: true };
+    }
+    return { value: converted ?? parsed, missing: false };
+  };
+
   const getProfitMeta = (amount, invested) => {
     const profit = amount - invested;
     const percent = invested > 0 ? (profit / invested) * 100 : null;
@@ -2248,15 +2446,23 @@ const renderCapitalAssets = () => {
     (acc, asset) => {
       const amount = assetValueInBase(asset, "amount");
       const invested = assetValueInBase(asset, "invested");
+      const expected = expectedValueInBase(asset);
       if (amount != null) {
         acc.amount += amount;
       }
       if (invested != null) {
         acc.invested += invested;
       }
+      if (expected.value != null) {
+        acc.expected += expected.value;
+        acc.expectedCount += 1;
+      } else if (expected.missing) {
+        acc.expectedMissing = true;
+        acc.expectedCount += 1;
+      }
       return acc;
     },
-    { amount: 0, invested: 0 }
+    { amount: 0, invested: 0, expected: 0, expectedCount: 0, expectedMissing: false }
   );
   const totalMeta = getProfitMeta(totals.amount, totals.invested);
   if (capitalAssetsSummaryTotal) {
@@ -2269,6 +2475,10 @@ const renderCapitalAssets = () => {
     capitalAssetsSummaryProfit.textContent = capitalFormatMoney(totalMeta.profit);
     capitalAssetsSummaryProfit.classList.toggle("is-negative", totalMeta.profit < 0);
   }
+  const profitCard = capitalAssetsSummaryProfit?.closest(".asset-summary-card");
+  if (profitCard) {
+    profitCard.classList.toggle("is-negative", totalMeta.profit < 0);
+  }
   if (capitalAssetsSummaryPercent) {
     if (totalMeta.percent == null) {
       capitalAssetsSummaryPercent.textContent = "—";
@@ -2280,6 +2490,23 @@ const renderCapitalAssets = () => {
   }
   if (capitalAssetsSummaryWarning) {
     capitalAssetsSummaryWarning.classList.toggle("is-hidden", totalMeta.percent != null);
+  }
+  if (capitalAssetsSummaryExpected) {
+    capitalAssetsSummaryExpected.textContent = capitalFormatMoney(totals.expected);
+  }
+  if (capitalAssetsSummaryExpectedNote) {
+    if (!totals.expectedCount) {
+      capitalAssetsSummaryExpectedNote.textContent = "—";
+      capitalAssetsSummaryExpectedNote.classList.remove("is-warning", "is-info");
+    } else if (totals.expectedMissing) {
+      capitalAssetsSummaryExpectedNote.textContent = "нет курса";
+      capitalAssetsSummaryExpectedNote.classList.add("is-warning");
+      capitalAssetsSummaryExpectedNote.classList.remove("is-info");
+    } else {
+      capitalAssetsSummaryExpectedNote.textContent = `в ${capitalState.settings.baseCurrency}`;
+      capitalAssetsSummaryExpectedNote.classList.add("is-info");
+      capitalAssetsSummaryExpectedNote.classList.remove("is-warning");
+    }
   }
 
   buildFilterOptions();
@@ -2379,6 +2606,7 @@ const renderCapitalAssets = () => {
       assets.forEach((asset) => {
         const amountBase = assetValueInBase(asset, "amount");
         const investedBase = assetValueInBase(asset, "invested");
+        const hasRate = amountBase != null && investedBase != null;
         const amountLabel = amountBase == null
           ? `нет курса для ${asset.currency}`
           : capitalFormatMoney(amountBase);
@@ -2392,13 +2620,30 @@ const renderCapitalAssets = () => {
         const percentLabel = profitMeta.percent == null ? "—" : `${profitMeta.percent.toFixed(1)}%`;
         const showPercentWarning = profitMeta.percent == null && hasRate;
         const liquidityLabel = capitalLiquidityShort(asset.liquidity);
+        const expectedData = expectedValueInBase(asset);
+        const expectedParsed = asset.expectedProfit != null && asset.expectedProfit !== ""
+          ? Number.parseFloat(asset.expectedProfit)
+          : null;
+        const expectedRaw = Number.isFinite(expectedParsed) ? expectedParsed : null;
+        let expectedLabel = "—";
+        if (asset.expectedProfit != null && asset.expectedProfit !== "") {
+          if (expectedData.value == null && expectedData.missing) {
+            expectedLabel = `нет курса`;
+          } else if (expectedData.value == null && expectedRaw == null) {
+            expectedLabel = "—";
+          } else {
+            expectedLabel = capitalFormatMoney(expectedData.value ?? expectedRaw);
+          }
+        }
+        const expectedMarkup = asset.expectedProfit != null && asset.expectedProfit !== ""
+          ? `<span class="asset-expected">ожид. ${expectedLabel}</span>`
+          : "";
         const iconLetter = (asset.name || "?").trim().charAt(0).toUpperCase();
         const iconValue = asset.icon || capitalDefaultIcon(asset.type);
         const avatarMarkup = asset.avatarDataUrl
           ? `<img src="${asset.avatarDataUrl}" alt="" />`
           : `<span>${iconValue || iconLetter}</span>`;
         const detailId = `asset-details-${asset.id}`;
-        const hasRate = amountBase != null && investedBase != null;
         const missingRateChip = hasRate ? "" : "<span class='chip chip-missing'>нет курса</span>";
 
         const card = document.createElement("div");
@@ -2421,6 +2666,7 @@ const renderCapitalAssets = () => {
               <span class="asset-profit-percent ${showPercentWarning ? "is-warning" : ""}">
                 ${percentLabel}
               </span>
+              ${expectedMarkup}
               ${showPercentWarning ? "<span class='asset-warning'>проверь данные</span><span class='chip chip-warning'>проверить</span>" : ""}
             </span>
             <span class="chip chip-liquidity">${liquidityLabel}</span>
@@ -2438,7 +2684,19 @@ const renderCapitalAssets = () => {
               </div>
               <div class="asset-detail-row">
                 <span>Потенц. доходность</span>
-                <strong>${asset.expectedProfit != null && asset.expectedProfit !== "" ? asset.expectedProfit : "—"}</strong>
+                <strong>${
+                  asset.expectedProfit != null && asset.expectedProfit !== ""
+                    ? expectedData.value == null && expectedData.missing
+                      ? `нет курса для ${asset.currency}`
+                      : expectedData.value == null && expectedRaw == null
+                        ? "—"
+                        : `${capitalFormatMoney(expectedData.value ?? expectedRaw)}${
+                          asset.currency !== capitalState.settings.baseCurrency && expectedData.value != null && expectedRaw != null
+                            ? ` (${expectedRaw.toFixed(2)} ${asset.currency})`
+                            : ""
+                        }`
+                    : "—"
+                }</strong>
               </div>
               <div class="asset-detail-row">
                 <span>Комментарий</span>
@@ -2609,7 +2867,7 @@ const goalMonthlyDelta = (goal) => {
 const goalStatus = (goal) => {
   const snapshots = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   const recent = snapshots.slice(-3);
   if (recent.length < 2) {
     return "нет данных";
@@ -2655,7 +2913,7 @@ const renderCapitalSnapshots = () => {
   }
   const sorted = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   sorted.forEach((item) => {
     const row = document.createElement("tr");
     row.dataset.snapshotMonth = item.month;
@@ -2676,7 +2934,7 @@ const renderCapitalHistoryChart = () => {
   capitalSnapshotsChart.innerHTML = "";
   const sorted = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   if (!sorted.length) {
     capitalSnapshotsChart.innerHTML = "<text x='50%' y='50%' text-anchor='middle' fill='#94a3b8'>Нет данных</text>";
     return;
@@ -2748,6 +3006,8 @@ const renderCapitalView = () => {
   capitalEnsureSnapshot();
   renderCapitalSummary();
   renderCapitalOverviewDashboard();
+  renderCapitalLedger();
+  renderCapitalStructureCharts();
   renderCapitalAssets();
   renderCapitalDebts();
   renderCapitalPayoff();
@@ -2896,6 +3156,10 @@ const capitalResetAssetForm = () => {
   capitalAssetAvatarDataUrl = "";
   updateCapitalAssetAvatarPreview("");
   capitalEditingAssetId = null;
+  const categoryLabel = capitalTypeLabel(capitalAssetType.value);
+  if (categoryLabel) {
+    updateCapitalSubcategoryOptions(categoryLabel, "");
+  }
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.textContent = "Добавить актив";
@@ -2916,7 +3180,7 @@ const capitalFillAssetForm = (asset) => {
   capitalAssetCurrency.value = asset.currency || capitalState.settings.baseCurrency;
   capitalAssetAmount.value = asset.amount ?? 0;
   capitalAssetInvested.value = asset.invested ?? asset.amount ?? 0;
-  capitalAssetSubcategory.value = asset.subcategory || "";
+  updateCapitalSubcategoryOptions(capitalTypeLabel(asset.type), asset.subcategory || "");
   capitalAssetMaturityDate.value = asset.maturityDate || "";
   capitalAssetLiquidity.value = asset.liquidity || "high";
   capitalAssetExpectedProfit.value = asset.expectedProfit ?? "";
@@ -3061,7 +3325,7 @@ const capitalCreateSnapshotNow = () => {
   const totals = capitalTotals();
   const last = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month))
+    .sort((a, b) => compareSnapshotMonth(a, b))
     .filter((item) => item.month !== month)
     .pop();
   const delta = last ? totals.netWorth - last.netWorth : 0;
@@ -3981,7 +4245,7 @@ onAll(capitalTabs, "click", (event) => {
     }
     capitalEnsureCategory(category, subcategory);
     saveCapitalV2(capitalState);
-    renderCapitalCategories();
+    renderCapitalView();
     capitalCategoryForm.reset();
   }, "категории капитала");
 
@@ -3990,22 +4254,35 @@ onAll(capitalTabs, "click", (event) => {
     if (!(target instanceof HTMLButtonElement)) {
       return;
     }
-    const categoryName = target.dataset.capitalCategoryDelete;
+    const categoryName = target.dataset.category;
     const subcategoryName = target.dataset.subcategory;
-    if (categoryName && !subcategoryName) {
-      capitalState.assetCategories = capitalState.assetCategories.filter((category) => category.name !== categoryName);
-      saveCapitalV2(capitalState);
-      renderCapitalCategories();
+    const categoryAction = target.dataset.capitalCategoryAction;
+    const subcategoryAction = target.dataset.capitalSubcategoryAction;
+
+    if (categoryAction === "rename" && categoryName) {
+      const nextName = prompt("Новое имя категории", categoryName);
+      if (nextName) {
+        renameCapitalCategory(categoryName, nextName);
+      }
       return;
     }
-    if (categoryName && subcategoryName) {
-      const category = capitalState.assetCategories.find((item) => item.name === categoryName);
-      if (!category) {
-        return;
+    if (categoryAction === "delete" && categoryName) {
+      if (confirm(`Удалить категорию «${categoryName}»?`)) {
+        deleteCapitalCategory(categoryName);
       }
-      category.subs = category.subs.filter((sub) => sub !== subcategoryName);
-      saveCapitalV2(capitalState);
-      renderCapitalCategories();
+      return;
+    }
+    if (subcategoryAction === "rename" && categoryName && subcategoryName) {
+      const nextName = prompt("Новое имя подкатегории", subcategoryName);
+      if (nextName) {
+        renameCapitalSubcategory(categoryName, subcategoryName, nextName);
+      }
+      return;
+    }
+    if (subcategoryAction === "delete" && categoryName && subcategoryName) {
+      if (confirm(`Удалить подкатегорию «${subcategoryName}»?`)) {
+        deleteCapitalSubcategory(categoryName, subcategoryName);
+      }
     }
   }, "удаление категории капитала");
 
@@ -4023,6 +4300,10 @@ onAll(capitalTabs, "click", (event) => {
     if (!isDeposit) {
       capitalAssetExpectedProfit.value = "";
       capitalAssetMaturityDate.value = "";
+    }
+    const categoryLabel = capitalTypeLabel(capitalAssetType.value);
+    if (categoryLabel) {
+      updateCapitalSubcategoryOptions(categoryLabel, "");
     }
   }, "тип актива");
 

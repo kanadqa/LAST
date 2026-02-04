@@ -228,7 +228,7 @@
                   </label>
                   <button type="submit" class="button secondary">Добавить</button>
                 </form>
-                <div id="capitalCategoryManager" class="capital-category-list"></div>
+                <div id="capitalCategoryManager" class="category-manager"></div>
               </div>
             </div>
           </section>
@@ -401,53 +401,16 @@
                 <p id="capitalLedgerNote" class="hint"></p>
               </div>
             </section>
-          </section>
 
-          <section class="capital-tab" data-capital-tab-panel="assets">
             <section class="card capital-grid">
-              <div class="capital-card capital-full">
-                <h3>Добавить активы</h3>
-                <p class="hint">Обновляйте курсы и добавляйте активы в одном месте.</p>
-                <div class="capital-add-grid">
-                  <div class="capital-add-panel">
-                    <h4>Курс валюты</h4>
-                    <div class="form compact-form">
-                      <label>
-                        Базовая валюта
-                        <select id="capitalBaseCurrency">
-                          <option value="RUB">RUB</option>
-                          <option value="USD">USD</option>
-                          <option value="EUR">EUR</option>
-                        </select>
-                      </label>
-                      <label>
-                        Валюта для курса
-                        <input type="text" id="capitalFxCurrency" placeholder="USD" maxlength="3" />
-                      </label>
-                      <button id="capitalFxRefresh" class="button secondary" type="button">Обновить курс</button>
-                    </div>
-                    <div class="capital-fx-summary">
-                      <strong id="capitalFxRateValue">—</strong>
-                      <span id="capitalFxUpdated" class="hint"></span>
-                    </div>
-                    <div class="capital-fx-chart">
-                      <svg id="capitalFxChart" viewBox="0 0 360 120" aria-label="График курса валюты"></svg>
-                    </div>
-                    <p id="capitalFxNote" class="hint"></p>
-                  </div>
-                  <div class="capital-add-panel">
-                    <h4>Новый актив</h4>
-                    <p class="hint">Быстро фиксируйте вклад/инвестицию: сколько вложили и сколько сейчас.</p>
-                    <button id="capitalAssetToggle" class="button primary" type="button">Добавить актив</button>
-                  </div>
-                </div>
-              </div>
-
               <div class="capital-card capital-full">
                 <div class="asset-list-shell">
                   <div class="asset-list-header">
-                    <h3>Список активов</h3>
-                    <span id="capitalAssetShown" class="asset-list-count">Показано: 0</span>
+                    <div>
+                      <h3>Список активов</h3>
+                      <span id="capitalAssetShown" class="asset-list-count">Показано: 0</span>
+                    </div>
+                    <button id="capitalAssetToggle" class="button primary" type="button">Добавить актив</button>
                   </div>
                   <div class="asset-filters">
                     <label class="asset-filter">
@@ -475,24 +438,60 @@
                   </div>
 
                   <div class="asset-summary">
-                    <div class="asset-summary-card">
+                    <div class="asset-summary-card total">
                       <span>Всего</span>
                       <strong id="capitalAssetsSummaryTotal">0 ₽</strong>
                     </div>
-                    <div class="asset-summary-card">
+                    <div class="asset-summary-card invested">
                       <span>Вложено</span>
                       <strong id="capitalAssetsSummaryInvested">0 ₽</strong>
                     </div>
-                    <div class="asset-summary-card">
+                    <div class="asset-summary-card profit">
                       <span>Прибыль</span>
                       <strong id="capitalAssetsSummaryProfit">0 ₽</strong>
                       <small id="capitalAssetsSummaryPercent" class="asset-summary-percent">—</small>
                       <span id="capitalAssetsSummaryWarning" class="chip chip-warning is-hidden">проверить</span>
                     </div>
+                    <div class="asset-summary-card expected">
+                      <span>Потенц. доходность</span>
+                      <strong id="capitalAssetsSummaryExpected">0 ₽</strong>
+                      <small id="capitalAssetsSummaryExpectedNote" class="asset-summary-percent">—</small>
+                    </div>
                   </div>
 
                   <div id="capitalAssetsList" class="asset-groups"></div>
                 </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="capital-tab" data-capital-tab-panel="assets">
+            <section class="card capital-grid">
+              <div class="capital-card capital-full">
+                <h3>Курс валюты</h3>
+                <div class="form compact-form">
+                  <label>
+                    Базовая валюта
+                    <select id="capitalBaseCurrency">
+                      <option value="RUB">RUB</option>
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </label>
+                  <label>
+                    Валюта для курса
+                    <input type="text" id="capitalFxCurrency" placeholder="USD" maxlength="3" />
+                  </label>
+                  <button id="capitalFxRefresh" class="button secondary" type="button">Обновить курс</button>
+                </div>
+                <div class="capital-fx-summary">
+                  <strong id="capitalFxRateValue">—</strong>
+                  <span id="capitalFxUpdated" class="hint"></span>
+                </div>
+                <div class="capital-fx-chart">
+                  <svg id="capitalFxChart" viewBox="0 0 360 120" aria-label="График курса валюты"></svg>
+                </div>
+                <p id="capitalFxNote" class="hint"></p>
               </div>
             </section>
           </section>
@@ -538,8 +537,7 @@
               </div>
               <label>
                 Подкатегория
-                <input type="text" id="capitalAssetSubcategory" list="capitalSubcategoryList" placeholder="Например, Сбербанк" />
-                <datalist id="capitalSubcategoryList"></datalist>
+                <select id="capitalAssetSubcategory"></select>
               </label>
               <label>
                 Валюта
