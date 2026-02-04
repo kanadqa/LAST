@@ -7,6 +7,11 @@ const expensePercentEl = document.getElementById("expensePercent");
 const exportButton = document.getElementById("exportCsv");
 const clearButton = document.getElementById("clearAll");
 const undoButton = document.getElementById("undoAction");
+const backupButton = document.getElementById("backupJson");
+const restoreInput = document.getElementById("restoreJson");
+const errorBanner = document.getElementById("errorBanner");
+const transactionFormTitle = document.getElementById("transactionFormTitle");
+const transactionCancelButton = document.getElementById("transactionCancel");
 const categorySelect = document.getElementById("category");
 const subcategorySelect = document.getElementById("subcategory");
 const categoryTypeSelect = document.getElementById("categoryType");
@@ -49,9 +54,6 @@ const capitalPanels = document.querySelectorAll("[data-capital-tab-panel]");
 const capitalAssetsTotal = document.getElementById("capitalAssetsTotal");
 const capitalDebtsTotal = document.getElementById("capitalDebtsTotal");
 const capitalNetWorth = document.getElementById("capitalNetWorth");
-const capitalLedger = document.getElementById("capitalLedger");
-const capitalLedgerTotal = document.getElementById("capitalLedgerTotal");
-const capitalLedgerNote = document.getElementById("capitalLedgerNote");
 const capitalOverviewBody = document.getElementById("capitalOverviewBody");
 const capitalOverviewTotal = document.getElementById("capitalOverviewTotal");
 const capitalOverviewNote = document.getElementById("capitalOverviewNote");
@@ -64,7 +66,6 @@ const capitalOverviewGoals = document.getElementById("capitalOverviewGoals");
 const capitalOverviewSnapshots = document.getElementById("capitalOverviewSnapshots");
 const capitalOverviewDebtsList = document.getElementById("capitalOverviewDebtsList");
 const capitalStructureButtons = document.querySelectorAll("[data-capital-structure]");
-const capitalOverviewFilters = document.querySelectorAll("[data-capital-filter]");
 const capitalAssetTypePie = document.getElementById("capitalAssetTypePie");
 const capitalAssetTypeChart = document.getElementById("capitalAssetTypeChart");
 const capitalExportButton = document.getElementById("capitalExport");
@@ -87,14 +88,33 @@ const capitalAssetCurrency = document.getElementById("capitalAssetCurrency");
 const capitalAssetAmount = document.getElementById("capitalAssetAmount");
 const capitalAssetInvested = document.getElementById("capitalAssetInvested");
 const capitalAssetSubcategory = document.getElementById("capitalAssetSubcategory");
-const capitalSubcategoryList = document.getElementById("capitalSubcategoryList");
+const capitalAssetIcon = document.getElementById("capitalAssetIcon");
+const capitalAssetAvatar = document.getElementById("capitalAssetAvatar");
+const capitalAssetAvatarRemove = document.getElementById("capitalAssetAvatarRemove");
+const capitalAssetAvatarPreview = document.getElementById("capitalAssetAvatarPreview");
 const capitalAssetMaturityDate = document.getElementById("capitalAssetMaturityDate");
 const capitalAssetLiquidity = document.getElementById("capitalAssetLiquidity");
 const capitalAssetExpectedProfit = document.getElementById("capitalAssetExpectedProfit");
 const capitalAssetNote = document.getElementById("capitalAssetNote");
 const capitalAssetClose = document.getElementById("capitalAssetClose");
 const capitalAssetDelete = document.getElementById("capitalAssetDelete");
-const capitalAssetsTable = document.getElementById("capitalAssetsTable");
+const capitalAssetDrawerTitle = document.getElementById("capitalAssetDrawerTitle");
+const toast = document.getElementById("toast");
+const selfTestPanel = document.getElementById("selfTestPanel");
+const capitalAssetsList = document.getElementById("capitalAssetsList");
+const capitalAssetSearch = document.getElementById("capitalAssetSearch");
+const capitalAssetTypeFilter = document.getElementById("capitalAssetTypeFilter");
+const capitalAssetLiquidityFilter = document.getElementById("capitalAssetLiquidityFilter");
+const capitalAssetSort = document.getElementById("capitalAssetSort");
+const capitalAssetSortDir = document.getElementById("capitalAssetSortDir");
+const capitalAssetShown = document.getElementById("capitalAssetShown");
+const capitalAssetsSummaryTotal = document.getElementById("capitalAssetsSummaryTotal");
+const capitalAssetsSummaryInvested = document.getElementById("capitalAssetsSummaryInvested");
+const capitalAssetsSummaryProfit = document.getElementById("capitalAssetsSummaryProfit");
+const capitalAssetsSummaryPercent = document.getElementById("capitalAssetsSummaryPercent");
+const capitalAssetsSummaryWarning = document.getElementById("capitalAssetsSummaryWarning");
+const capitalAssetsSummaryExpected = document.getElementById("capitalAssetsSummaryExpected");
+const capitalAssetsSummaryExpectedNote = document.getElementById("capitalAssetsSummaryExpectedNote");
 const capitalAssetViewButtons = document.querySelectorAll("[data-capital-asset-view]");
 const capitalAssetPanels = document.querySelectorAll("[data-capital-asset-panel]");
 const capitalCategoryForm = document.getElementById("capitalCategoryForm");
@@ -136,6 +156,43 @@ const CHART_LIMIT = 6;
 const CAPITAL_KEY_V2 = "budget.capital.v2";
 const CAPITAL_KEY_V1 = "budget.capital.v1";
 const CAPITAL_MIGRATED_KEY = "budget.capital.migrated";
+const CAPITAL_ASSETS_UI_KEY = "budget.capital.assets.uiState";
+
+const showError = (message) => {
+  if (!errorBanner) {
+    alert(message);
+    return;
+  }
+  errorBanner.textContent = message;
+  errorBanner.classList.remove("is-hidden");
+};
+
+const clearError = () => {
+  if (errorBanner) {
+    errorBanner.classList.add("is-hidden");
+    errorBanner.textContent = "";
+  }
+};
+
+const safeExec = (fn, context = "operation") => async (...args) => {
+  try {
+    clearError();
+    await fn(...args);
+  } catch (error) {
+    console.error(`Ошибка в ${context}`, error);
+    showError(`Произошла ошибка: ${context}. Проверьте данные и попробуйте снова.`);
+  }
+};
+
+window.addEventListener("error", (event) => {
+  console.error("Глобальная ошибка", event.error || event.message);
+  showError("Произошла ошибка в приложении. Обновите страницу или попробуйте снова.");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("Необработанное отклонение промиса", event.reason);
+  showError("Произошла ошибка при выполнении операции. Проверьте данные.");
+});
 
 const currencyFormatter = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -162,44 +219,95 @@ const DB_NAME = "budgetAppDb";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 
-const dbOpen = () => new Promise((resolve, reject) => {
-  const request = indexedDB.open(DB_NAME, DB_VERSION);
-  request.onupgradeneeded = () => {
-    const db = request.result;
-    if (!db.objectStoreNames.contains(DB_STORE)) {
-      db.createObjectStore(DB_STORE);
-    }
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
+const Storage = (() => {
+  let dbInstance = null;
 
-const dbGet = async (key) => {
-  const db = await dbOpen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, "readonly");
-    const store = tx.objectStore(DB_STORE);
-    const request = store.get(key);
-    request.onsuccess = () => resolve(request.result ?? null);
+  const dbOpen = () => new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+
+  const init = async () => {
+    if (!dbInstance) {
+      dbInstance = await dbOpen();
+    }
+    return dbInstance;
+  };
+
+  const get = async (key) => {
+    const db = dbInstance || await dbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readonly");
+      const store = tx.objectStore(DB_STORE);
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  const set = async (key, value) => {
+    const db = dbInstance || await dbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readwrite");
+      const store = tx.objectStore(DB_STORE);
+      const request = store.put(value, key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  return { init, get, set };
+})();
+
+const generateId = (prefix = "item") =>
+  (crypto.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+const normalizeTransaction = (item) => {
+  const baseDate = item.date || new Date().toISOString().slice(0, 10);
+  const createdAt = item.createdAt || new Date(baseDate).toISOString();
+  const updatedAt = item.updatedAt || createdAt;
+  const amount = Number.parseFloat(item.amount);
+  return {
+    id: item.id || generateId("tx"),
+    date: baseDate,
+    type: item.type === "income" ? "income" : "expense",
+    category: item.category || "",
+    subcategory: item.subcategory || "",
+    amount: Number.isFinite(amount) ? amount : 0,
+    note: item.note || "",
+    createdAt,
+    updatedAt,
+  };
 };
 
-const dbSet = async (key, value) => {
-  const db = await dbOpen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, "readwrite");
-    const store = tx.objectStore(DB_STORE);
-    const request = store.put(value, key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+const normalizeTransactions = (items) => {
+  let migrated = false;
+  const normalized = (Array.isArray(items) ? items : []).map((item) => {
+    const next = normalizeTransaction(item || {});
+    if (!item?.id || !item?.createdAt || !item?.updatedAt || !Number.isFinite(item?.amount)) {
+      migrated = true;
+    }
+    return next;
   });
+  return { normalized, migrated };
 };
 
 const loadTransactions = async () => {
   try {
-    const raw = await dbGet(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = await Storage.get(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const { normalized, migrated } = normalizeTransactions(parsed);
+    if (migrated) {
+      await Storage.set(STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch (error) {
     console.error("Не удалось загрузить данные", error);
     return [];
@@ -227,7 +335,7 @@ const normalizeCategories = (raw) => {
 
 const loadCategories = async () => {
   try {
-    const raw = await dbGet(CATEGORY_KEY);
+    const raw = await Storage.get(CATEGORY_KEY);
     if (raw) {
       return normalizeCategories(JSON.parse(raw));
     }
@@ -243,7 +351,7 @@ const loadCategories = async () => {
 
 const loadCapitalV2 = async () => {
   try {
-    const raw = await dbGet(CAPITAL_KEY_V2);
+    const raw = await Storage.get(CAPITAL_KEY_V2);
     if (raw) {
       return JSON.parse(raw);
     }
@@ -253,13 +361,11 @@ const loadCapitalV2 = async () => {
   return null;
 };
 
-const saveCapitalV2 = (nextState) => {
-  dbSet(CAPITAL_KEY_V2, JSON.stringify(nextState));
-};
+const saveCapitalV2 = (nextState) => Storage.set(CAPITAL_KEY_V2, JSON.stringify(nextState));
 
 const loadCapitalV1 = async () => {
   try {
-    const raw = await dbGet(CAPITAL_KEY_V1);
+    const raw = await Storage.get(CAPITAL_KEY_V1);
     return raw ? JSON.parse(raw) : null;
   } catch (error) {
     console.error("Не удалось загрузить капитал (v1)", error);
@@ -273,7 +379,7 @@ const migrateCapitalState = async () => {
     return existing;
   }
 
-  const migratedFlag = await dbGet(CAPITAL_MIGRATED_KEY);
+  const migratedFlag = await Storage.get(CAPITAL_MIGRATED_KEY);
   const legacy = await loadCapitalV1();
   const baseState = {
     assets: [],
@@ -288,7 +394,7 @@ const migrateCapitalState = async () => {
 
   if (!legacy || migratedFlag) {
     saveCapitalV2(baseState);
-    dbSet(CAPITAL_MIGRATED_KEY, "true");
+    Storage.set(CAPITAL_MIGRATED_KEY, "true");
     return baseState;
   }
 
@@ -351,36 +457,133 @@ const migrateCapitalState = async () => {
     snapshots: mappedSnapshots,
   };
   saveCapitalV2(migrated);
-  dbSet(CAPITAL_MIGRATED_KEY, "true");
+  Storage.set(CAPITAL_MIGRATED_KEY, "true");
   return migrated;
 };
 
 const saveCategories = (nextCategories) => {
-  dbSet(CATEGORY_KEY, JSON.stringify(nextCategories));
+  Storage.set(CATEGORY_KEY, JSON.stringify(nextCategories));
+};
+
+const downloadJson = (payload, filename) => {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const buildBackupPayload = () => ({
+  version: 1,
+  createdAt: new Date().toISOString(),
+  transactions,
+  categories,
+  capitalState,
+  settings: {
+    view: activeView,
+    layout: currentLayout,
+    baseCurrency: capitalState?.settings?.baseCurrency,
+    fxRates: capitalState?.settings?.fxRates,
+  },
+});
+
+const applyBackupPayload = async (payload) => {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Некорректный формат backup.");
+  }
+  const normalizedTransactions = normalizeTransactions(payload.transactions || []).normalized;
+  const normalizedCategories = normalizeCategories(payload.categories || {});
+  transactions = normalizedTransactions;
+  categories = normalizedCategories || await loadCategories();
+  capitalState = payload.capitalState || await migrateCapitalState();
+  if (payload.settings?.baseCurrency || payload.settings?.fxRates) {
+    capitalState.settings = {
+      ...(capitalState.settings || { baseCurrency: "RUB", fxRates: {} }),
+      baseCurrency: payload.settings?.baseCurrency || capitalState.settings?.baseCurrency || "RUB",
+      fxRates: payload.settings?.fxRates || capitalState.settings?.fxRates || {},
+    };
+  }
+  normalizeCapitalState();
+  await Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+  await Storage.set(CATEGORY_KEY, JSON.stringify(categories));
+  await saveCapitalV2(capitalState);
+  if (payload.settings?.view) {
+    await Storage.set(VIEW_KEY, payload.settings.view);
+  }
+  if (payload.settings?.layout) {
+    await Storage.set(LAYOUT_KEY, payload.settings.layout);
+  }
 };
 
 let transactions = [];
 let categories = [];
-let historyStack = [];
+let undoStack = [];
 let showAllSubcategories = false;
 let showAllExpenseCategories = false;
 let categoryFilter = "all";
 let reportGranularity = "daily";
 let reportRange = { start: "", end: "" };
 let capitalState = null;
-let capitalOverviewFilter = "all";
 let capitalEditingAssetId = null;
+let editingTransactionId = null;
+let activeView = "dashboard";
+let currentLayout = "comfort";
+const assetFilters = {
+  search: "",
+  type: "all",
+  liquidity: "all",
+  sort: "amount",
+  direction: "desc",
+};
+let capitalAssetAvatarDataUrl = "";
+let assetUiState = { groups: {}, subgroups: {} };
+
+const persistAssetUiState = () => Storage.set(CAPITAL_ASSETS_UI_KEY, JSON.stringify(assetUiState));
 
 const capitalIsUnconvertible = (asset) =>
   asset.currency !== capitalState?.settings?.baseCurrency
   && !capitalState?.settings?.fxRates?.[asset.currency];
 
+const normalizeCurrency = (value, fallback = "RUB") => {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim().toUpperCase();
+  return trimmed || fallback;
+};
+
+const sanitizeNumber = (value, fallback = 0) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const formatSnapshotMonth = (date) => date.toISOString().slice(0, 7);
+
+const normalizeSnapshotMonth = (snapshot) => {
+  const raw = snapshot?.month;
+  if (typeof raw === "string" && /^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  const candidate = snapshot?.createdAt || snapshot?.updatedAt;
+  const date = candidate ? new Date(candidate) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return formatSnapshotMonth(new Date());
+  }
+  return formatSnapshotMonth(date);
+};
+
+const compareSnapshotMonth = (a, b, direction = 1) =>
+  direction * String(a?.month || "").localeCompare(String(b?.month || ""));
+
 const normalizeCapitalState = () => {
   if (!capitalState) {
-    return;
+    return false;
   }
+  let migrated = false;
   capitalState.settings = capitalState.settings || { baseCurrency: "RUB", fxRates: {} };
-  capitalState.settings.baseCurrency = capitalState.settings.baseCurrency || "RUB";
+  capitalState.settings.baseCurrency = normalizeCurrency(capitalState.settings.baseCurrency, "RUB");
   capitalState.settings.fxRates = capitalState.settings.fxRates || {};
   if (!capitalState.assetCategories) {
     capitalState.assetCategories = [];
@@ -396,17 +599,29 @@ const normalizeCapitalState = () => {
     const maturityDate = asset.maturityDate || (isDeposit ? asset.unlockDate : "") || "";
     const liquidity = maturityDate ? "locked" : (asset.liquidity || "high");
     const categoryFallback = asset.section || (isDeposit ? "Вклады" : "В наличии");
+    const currency = normalizeCurrency(asset.currency, capitalState.settings.baseCurrency);
+    const amount = sanitizeNumber(asset.amount);
+    const invested = sanitizeNumber(asset.invested ?? amount);
+    const createdAt = asset.createdAt || asset.updatedAt || new Date().toISOString();
+    if (!asset.id || !asset.updatedAt || !asset.createdAt) {
+      migrated = true;
+    }
     return {
+      id: asset.id || generateId("asset"),
+      createdAt,
+      updatedAt: asset.updatedAt || new Date().toISOString(),
       section: asset.section || (isDeposit ? "Вклады" : "В наличии"),
       category: asset.category || categoryFallback,
       subcategory: asset.subcategory || "",
-      invested: asset.invested ?? asset.amount ?? 0,
+      invested,
       liquidity,
       liquidityDays: asset.liquidityDays ?? null,
       expectedProfit: isDeposit ? (asset.expectedProfit ?? null) : null,
       maturityDate,
       unconvertible: asset.unconvertible ?? false,
       ...asset,
+      currency,
+      amount,
     };
   });
   capitalState.assets = capitalState.assets.map((asset) => ({
@@ -429,40 +644,100 @@ const normalizeCapitalState = () => {
       subs: [...subs],
     }));
   }
-  capitalState.debts = capitalState.debts || [];
-  capitalState.goals = capitalState.goals || [];
-  capitalState.snapshots = capitalState.snapshots || [];
+  capitalState.debts = (capitalState.debts || []).map((debt) => ({
+    id: debt.id || generateId("debt"),
+    createdAt: debt.createdAt || debt.updatedAt || new Date().toISOString(),
+    updatedAt: debt.updatedAt || new Date().toISOString(),
+    currency: normalizeCurrency(debt.currency, capitalState.settings.baseCurrency),
+    principal: sanitizeNumber(debt.principal),
+    apr: debt.apr === null ? null : sanitizeNumber(debt.apr, null),
+    paymentMin: debt.paymentMin === null ? null : sanitizeNumber(debt.paymentMin, null),
+    ...debt,
+  }));
+  capitalState.goals = (capitalState.goals || []).map((goal) => ({
+    id: goal.id || generateId("goal"),
+    createdAt: goal.createdAt || goal.updatedAt || new Date().toISOString(),
+    updatedAt: goal.updatedAt || new Date().toISOString(),
+    targetAmount: sanitizeNumber(goal.targetAmount, 0),
+    baselineAmount: goal.baselineAmount === null ? null : sanitizeNumber(goal.baselineAmount, null),
+    ...goal,
+  }));
+  capitalState.snapshots = (capitalState.snapshots || []).map((snap) => {
+    const normalizedMonth = normalizeSnapshotMonth(snap);
+    if (!snap.month || snap.month !== normalizedMonth) {
+      migrated = true;
+    }
+    return {
+      id: snap.id || generateId("snapshot"),
+      createdAt: snap.createdAt || snap.updatedAt || new Date().toISOString(),
+      updatedAt: snap.updatedAt || new Date().toISOString(),
+      assetsTotal: sanitizeNumber(snap.assetsTotal, 0),
+      debtsTotal: sanitizeNumber(snap.debtsTotal, 0),
+      netWorth: sanitizeNumber(snap.netWorth, 0),
+      delta: sanitizeNumber(snap.delta, 0),
+      ...snap,
+      month: normalizedMonth,
+    };
+  });
+  return migrated;
 };
 
 normalizeCapitalState();
 
-const pushHistory = () => {
-  historyStack.push({
-    transactions: JSON.parse(JSON.stringify(transactions)),
-    categories: JSON.parse(JSON.stringify(categories)),
-  });
-  if (historyStack.length > 20) {
-    historyStack.shift();
+const touchTransaction = (item, updates = {}) => ({
+  ...item,
+  ...updates,
+  updatedAt: new Date().toISOString(),
+});
+
+const recordUndo = (kind, payload) => {
+  if (!["addTx", "editTx", "deleteTx"].includes(kind)) {
+    return;
+  }
+  undoStack.push({ kind, payload, ts: Date.now() });
+  if (undoStack.length > 20) {
+    undoStack.shift();
   }
   updateUndoState();
 };
 
 const undoLastAction = () => {
-  const previous = historyStack.pop();
+  const previous = undoStack.pop();
   if (!previous) {
     return;
   }
-  transactions = previous.transactions;
-  categories = previous.categories;
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
-  saveCategories(categories);
-  renderCategories();
-  render();
+
+  if (previous.kind === "addTx") {
+    transactions = transactions.filter((item) => item.id !== previous.payload.id);
+  }
+
+  if (previous.kind === "deleteTx") {
+    const restored = previous.payload;
+    const index = restored.index ?? transactions.length;
+    if (Number.isFinite(index) && index >= 0 && index <= transactions.length) {
+      transactions.splice(index, 0, restored.item);
+    } else {
+      transactions.push(restored.item);
+    }
+  }
+
+  if (previous.kind === "editTx") {
+    const { before } = previous.payload;
+    const index = transactions.findIndex((item) => item.id === before.id);
+    if (index !== -1) {
+      transactions[index] = before;
+    }
+  }
+
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+  render(activeView);
   updateUndoState();
 };
 
 const updateUndoState = () => {
-  undoButton.disabled = historyStack.length === 0;
+  if (undoButton) {
+    undoButton.disabled = undoStack.length === 0;
+  }
 };
 
 const updateSummary = () => {
@@ -485,6 +760,34 @@ const updateSummary = () => {
   expensePercentEl.textContent = `${percent.toFixed(1)}% от доходов`;
 };
 
+const setTransactionFormMode = (mode, transaction = null) => {
+  editingTransactionId = mode === "edit" && transaction ? transaction.id : null;
+  if (transactionFormTitle) {
+    transactionFormTitle.textContent = editingTransactionId ? "Редактировать операцию" : "Добавить операцию";
+  }
+  if (transactionCancelButton) {
+    transactionCancelButton.classList.toggle("is-hidden", !editingTransactionId);
+  }
+  if (transactionSubmitButton) {
+    transactionSubmitButton.textContent = editingTransactionId ? "Сохранить изменения" : "Сохранить";
+  }
+};
+
+const ensureSubcategoryOption = (value) => {
+  if (!subcategorySelect || !value) {
+    return;
+  }
+  const hasOption = [...subcategorySelect.options].some((option) => option.value === value);
+  if (!hasOption) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    subcategorySelect.appendChild(option);
+  }
+  subcategorySelect.disabled = false;
+  subcategorySelect.value = value;
+};
+
 const renderTable = () => {
   tableBody.innerHTML = "";
 
@@ -499,10 +802,11 @@ const renderTable = () => {
     return;
   }
 
-  transactions
+  const displayList = transactions
     .slice()
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .forEach((item, index) => {
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  displayList.forEach((item) => {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${item.date}</td>
@@ -511,7 +815,10 @@ const renderTable = () => {
         <td>${item.subcategory || "—"}</td>
         <td>${currencyFormatter.format(item.amount)}</td>
         <td>${item.note || "—"}</td>
-        <td><button class="button secondary" data-index="${index}">Удалить</button></td>
+        <td class="table-actions">
+          <button class="button secondary small" data-action="edit" data-id="${item.id}">Ред.</button>
+          <button class="button secondary small" data-action="delete" data-id="${item.id}">Удалить</button>
+        </td>
       `;
       tableBody.appendChild(row);
     });
@@ -933,6 +1240,7 @@ const renderCategories = () => {
   renderCategoryOptions();
   renderCategoryListOptions();
   renderCategoryManager();
+  updateTransactionFormState();
 };
 
 const updateSubcategoryOptions = (categoryName) => {
@@ -1058,6 +1366,152 @@ const capitalNowIso = () => new Date().toISOString();
 const capitalGenerateId = (prefix) =>
   (crypto.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random()}`);
 
+const capitalDefaultIcon = (type) => ({
+  cash: "💵",
+  bank: "🏦",
+  deposit: "🧾",
+  investment: "📈",
+  real_estate: "🏠",
+  other: "📦",
+}[type] || "💼");
+
+const showToast = (message) => {
+  if (!toast) {
+    return;
+  }
+  toast.textContent = message;
+  toast.classList.remove("is-hidden");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
+    toast.classList.add("is-hidden");
+  }, 2200);
+};
+
+const renderSelfTestPanel = (results) => {
+  if (!selfTestPanel) {
+    return;
+  }
+  selfTestPanel.classList.remove("is-hidden");
+  selfTestPanel.innerHTML = `
+    <strong>Self-test</strong>
+    <ul>
+      ${results.map((item) => `<li>${item.pass ? "✅" : "❌"} ${item.name}</li>`).join("")}
+    </ul>
+  `;
+};
+
+const selfTest = async () => {
+  const results = [];
+  const record = (name, pass) => results.push({ name, pass });
+  const originalPayload = buildBackupPayload();
+  try {
+    const baseCurrency = capitalState.settings.baseCurrency;
+    const testAssetId = capitalGenerateId("asset");
+    capitalState.assets.push({
+      id: testAssetId,
+      name: "QA Актив",
+      type: "cash",
+      currency: baseCurrency,
+      amount: 1000,
+      invested: 900,
+      section: "В наличии",
+      category: "Наличные",
+      subcategory: "QA",
+      liquidity: "high",
+      expectedProfit: null,
+      maturityDate: "",
+      note: "selftest",
+      icon: "🧪",
+      avatarDataUrl: "",
+      createdAt: capitalNowIso(),
+      updatedAt: capitalNowIso(),
+    });
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Добавление актива", Boolean(capitalState.assets.find((a) => a.id === testAssetId)));
+
+    const asset = capitalState.assets.find((a) => a.id === testAssetId);
+    if (asset) {
+      asset.name = "QA Актив (редакт.)";
+      asset.updatedAt = capitalNowIso();
+    }
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Редактирование актива", Boolean(capitalState.assets.find((a) => a.name.includes("редакт"))));
+
+    assetFilters.search = "QA";
+    renderCapitalAssets();
+    const displayed = capitalAssetsList?.querySelectorAll(".asset-item").length || 0;
+    record("Фильтр/сортировка", displayed >= 1);
+    assetFilters.search = "";
+    renderCapitalAssets();
+
+    capitalState.assets = capitalState.assets.filter((a) => a.id !== testAssetId);
+    await saveCapitalV2(capitalState);
+    renderCapitalView();
+    record("Удаление актива", !capitalState.assets.find((a) => a.id === testAssetId));
+
+    const backup = buildBackupPayload();
+    await applyBackupPayload(backup);
+    record("Backup/restore", true);
+  } catch (error) {
+    console.error("Selftest failed", error);
+    record("Selftest runtime", false);
+  } finally {
+    await applyBackupPayload(originalPayload);
+    renderCapitalView();
+  }
+  console.table(results);
+  renderSelfTestPanel(results);
+};
+
+const dataUrlSizeBytes = (dataUrl) => {
+  const base64 = dataUrl.split(",")[1] || "";
+  return Math.ceil((base64.length * 3) / 4);
+};
+
+const compressImageToDataUrl = async (file) => {
+  const bitmap = await createImageBitmap(file);
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return "";
+  }
+  const scale = Math.max(size / bitmap.width, size / bitmap.height);
+  const width = bitmap.width * scale;
+  const height = bitmap.height * scale;
+  const dx = (size - width) / 2;
+  const dy = (size - height) / 2;
+  ctx.drawImage(bitmap, dx, dy, width, height);
+
+  let quality = 0.9;
+  const limit = 180 * 1024;
+  while (quality >= 0.4) {
+    const dataUrl = canvas.toDataURL("image/jpeg", quality);
+    if (dataUrlSizeBytes(dataUrl) <= limit) {
+      return dataUrl;
+    }
+    quality -= 0.05;
+  }
+  return canvas.toDataURL("image/jpeg", 0.4);
+};
+
+const updateCapitalAssetAvatarPreview = (dataUrl) => {
+  if (!capitalAssetAvatarPreview) {
+    return;
+  }
+  if (dataUrl) {
+    capitalAssetAvatarPreview.innerHTML = `<img src="${dataUrl}" alt="Фото актива" />`;
+    capitalAssetAvatarRemove?.classList.remove("is-hidden");
+  } else {
+    capitalAssetAvatarPreview.innerHTML = `<span class="hint">Фото пока не выбрано</span>`;
+    capitalAssetAvatarRemove?.classList.add("is-hidden");
+  }
+};
+
 const capitalMonthKey = () => new Date().toISOString().slice(0, 7);
 
 const capitalToBase = (value, currency) => {
@@ -1071,7 +1525,7 @@ const capitalToBase = (value, currency) => {
   return value * rate;
 };
 
-const capitalFxEndpoint = "https://api.exchangerate.host";
+const capitalFxEndpoint = "https://api.frankfurter.dev/v1";
 
 const capitalFetchRate = async (base, currency) => {
   const url = `${capitalFxEndpoint}/latest?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}`;
@@ -1084,7 +1538,7 @@ const capitalFetchRate = async (base, currency) => {
   if (!rate) {
     throw new Error("No rate");
   }
-  return rate;
+  return { rate, date: data?.date };
 };
 
 const capitalFetchSeries = async (base, currency) => {
@@ -1093,13 +1547,13 @@ const capitalFetchSeries = async (base, currency) => {
   start.setDate(end.getDate() - 29);
   const startDate = start.toISOString().slice(0, 10);
   const endDate = end.toISOString().slice(0, 10);
-  const url = `${capitalFxEndpoint}/timeseries?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}&start_date=${startDate}&end_date=${endDate}`;
+  const url = `${capitalFxEndpoint}/${startDate}..${endDate}?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(currency)}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error("FX series fetch failed");
   }
   const data = await response.json();
-  const entries = Object.entries(data?.rates || {}).sort(([a], [b]) => a.localeCompare(b));
+  const entries = Object.entries(data?.rates || {}).sort(([a], [b]) => String(a).localeCompare(String(b)));
   return entries.map(([date, rates]) => ({ date, value: rates[currency] })).filter((item) => item.value);
 };
 
@@ -1155,18 +1609,19 @@ const refreshFxRate = async () => {
   }
   capitalFxNote.textContent = "Загружаем курс...";
   try {
-    const rate = await capitalFetchRate(base, currency);
+    const { rate, date } = await capitalFetchRate(base, currency);
     capitalState.settings.baseCurrency = base;
     capitalState.settings.fxRates[currency] = rate;
     saveCapitalV2(capitalState);
     capitalFxRateValue.textContent = rate.toFixed(4);
-    capitalFxUpdated.textContent = `на ${new Date().toLocaleDateString("ru-RU")}`;
+    const updatedDate = date ? new Date(date) : new Date();
+    capitalFxUpdated.textContent = `на ${updatedDate.toLocaleDateString("ru-RU")}`;
     capitalFxNote.textContent = "";
     const series = await capitalFetchSeries(base, currency);
     renderFxChart(series);
     renderCapitalView();
   } catch (error) {
-    capitalFxNote.textContent = "Не удалось обновить курс. Проверьте соединение.";
+    capitalFxNote.textContent = "Не удалось обновить курс. Оставили последнее значение.";
   }
 };
 
@@ -1180,7 +1635,7 @@ const ensureFxRateForCurrency = async (currency) => {
     return;
   }
   try {
-    const rate = await capitalFetchRate(base, normalized);
+    const { rate } = await capitalFetchRate(base, normalized);
     capitalState.settings.fxRates[normalized] = rate;
     saveCapitalV2(capitalState);
   } catch (error) {
@@ -1225,6 +1680,13 @@ const capitalLiquidityLabel = (value) => ({
   locked: "Заблокировано до даты",
 }[value] || value);
 
+const capitalLiquidityShort = (value) => ({
+  high: "Сразу",
+  medium: "Нужно 1–3 дня",
+  low: "Низкая",
+  locked: "Заблокировано",
+}[value] || value);
+
 const capitalDebtTypeLabel = (value) => ({
   credit_card: "Кредитная карта",
   loan: "Кредит",
@@ -1242,7 +1704,7 @@ const capitalEnsureSnapshot = () => {
   const totals = capitalTotals();
   const last = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month))
+    .sort((a, b) => compareSnapshotMonth(a, b))
     .pop();
   const delta = last ? totals.netWorth - last.netWorth : 0;
   capitalState.snapshots.push({
@@ -1268,115 +1730,6 @@ const renderCapitalSummary = () => {
     capitalNetWorth.textContent = capitalFormatMoney(totals.netWorth);
   }
   return totals;
-};
-
-const renderCapitalLedger = () => {
-  if (!capitalLedger) {
-    return;
-  }
-  const totals = capitalTotals();
-  capitalLedger.innerHTML = "";
-  capitalLedgerTotal.textContent = capitalFormatMoney(totals.assetsTotal);
-  capitalLedgerNote.textContent = totals.missingRates.length
-    ? `Не учтены суммы без курса: ${[...new Set(totals.missingRates)].join(", ")}.`
-    : "";
-
-  const filteredAssets = capitalState.assets.filter((asset) => {
-    if (capitalOverviewFilter === "all") {
-      return true;
-    }
-    return asset.liquidity === capitalOverviewFilter;
-  });
-
-  if (!filteredAssets.length) {
-    capitalLedger.innerHTML = "<p class='hint'>Добавьте активы, чтобы увидеть список.</p>";
-    return;
-  }
-
-  const header = document.createElement("div");
-  header.className = "capital-ledger-row capital-ledger-head";
-  header.innerHTML = `
-    <div>Актив</div>
-    <div class="capital-ledger-amount">Сумма (${capitalState.settings.baseCurrency})</div>
-    <div class="capital-ledger-profit">Потенциальная доходность</div>
-    <div class="capital-ledger-note">Комментарий</div>
-  `;
-  capitalLedger.appendChild(header);
-
-  const grouped = new Map();
-  filteredAssets.forEach((asset) => {
-    const category = asset.category || asset.section || "В наличии";
-    if (!grouped.has(category)) {
-      grouped.set(category, new Map());
-    }
-    const subcategory = asset.subcategory || "Без подкатегории";
-    if (!grouped.get(category).has(subcategory)) {
-      grouped.get(category).set(subcategory, []);
-    }
-    grouped.get(category).get(subcategory).push(asset);
-  });
-
-  grouped.forEach((subcategories, categoryName) => {
-    const categoryHeader = document.createElement("div");
-    categoryHeader.className = "capital-ledger-section";
-    categoryHeader.textContent = categoryName;
-    capitalLedger.appendChild(categoryHeader);
-
-    subcategories.forEach((assets, subcategoryName) => {
-      const subHeader = document.createElement("div");
-      subHeader.className = "capital-ledger-note";
-      subHeader.textContent = subcategoryName;
-      capitalLedger.appendChild(subHeader);
-
-      assets.forEach((asset) => {
-        const converted = capitalToBase(asset.amount, asset.currency);
-        const hasRate = converted != null || !capitalIsUnconvertible(asset);
-        const amountLabel = hasRate
-          ? capitalFormatMoney(converted ?? asset.amount)
-          : `нет курса для ${asset.currency}`;
-
-        let profitLabel = "—";
-        let profitSubtext = "";
-        if (asset.expectedProfit != null && asset.expectedProfit !== "") {
-          const profitConverted = capitalToBase(asset.expectedProfit, asset.currency);
-          if (profitConverted == null && capitalIsUnconvertible(asset)) {
-            profitLabel = `нет курса для ${asset.currency}`;
-          } else {
-            profitLabel = capitalFormatMoney(profitConverted ?? asset.expectedProfit);
-            if (asset.currency !== capitalState.settings.baseCurrency) {
-              profitSubtext = `оригинал: ${asset.expectedProfit.toFixed(2)} ${asset.currency}`;
-            }
-          }
-        }
-
-        const row = document.createElement("div");
-        row.className = `capital-ledger-row${hasRate ? "" : " is-warning"}`;
-        row.innerHTML = `
-          <div>
-            <div>${asset.name}</div>
-            <div class="capital-ledger-meta">
-              <span>${asset.category || asset.section || "В наличии"}</span>
-              <span>${asset.subcategory || "Без подкатегории"}</span>
-              <span>${capitalLiquidityLabel(asset.liquidity)}</span>
-            </div>
-          </div>
-          <div class="capital-ledger-amount">
-            ${amountLabel}
-            ${asset.currency !== capitalState.settings.baseCurrency && hasRate
-              ? `<span>оригинал: ${asset.amount.toFixed(2)} ${asset.currency}</span>`
-              : ""}
-          </div>
-          <div class="capital-ledger-profit">
-            ${profitLabel}
-            ${asset.maturityDate ? `<span>ожидаемо к ${asset.maturityDate}</span>` : ""}
-            ${profitSubtext ? `<span>${profitSubtext}</span>` : ""}
-          </div>
-          <div class="capital-ledger-note">${asset.note || "—"}</div>
-        `;
-        capitalLedger.appendChild(row);
-      });
-    });
-  });
 };
 
 const renderCapitalStructureCharts = () => {
@@ -1532,7 +1885,7 @@ const renderCapitalOverviewDashboard = () => {
   }
 
   if (capitalOverviewDelta) {
-    const sorted = capitalState.snapshots.slice().sort((a, b) => a.month.localeCompare(b.month));
+    const sorted = capitalState.snapshots.slice().sort((a, b) => compareSnapshotMonth(a, b));
     const last = sorted[sorted.length - 1];
     const prev = sorted[sorted.length - 2];
     if (last && prev && prev.netWorth) {
@@ -1601,7 +1954,10 @@ const renderCapitalOverviewDashboard = () => {
 
   if (capitalOverviewSnapshots) {
     capitalOverviewSnapshots.innerHTML = "";
-    const snapshots = capitalState.snapshots.slice().sort((a, b) => b.month.localeCompare(a.month)).slice(0, 4);
+    const snapshots = capitalState.snapshots
+      .slice()
+      .sort((a, b) => compareSnapshotMonth(a, b, -1))
+      .slice(0, 4);
     if (!snapshots.length) {
       capitalOverviewSnapshots.innerHTML = "<p class='hint'>Нет снимков капитала.</p>";
     } else {
@@ -1670,129 +2026,579 @@ const capitalEnsureCategory = (name, subcategory = "") => {
   }
 };
 
+const renameCapitalCategory = (oldName, newName) => {
+  const trimmed = newName.trim();
+  if (!trimmed || oldName === trimmed) {
+    return;
+  }
+  if (capitalState.assetCategories.some((category) => category.name === trimmed)) {
+    showError("Категория с таким названием уже существует.");
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === oldName);
+  if (!category) {
+    return;
+  }
+  category.name = trimmed;
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === oldName ? { ...asset, category: trimmed, updatedAt: capitalNowIso() } : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const deleteCapitalCategory = (categoryName) => {
+  if (!categoryName) {
+    return;
+  }
+  const remaining = capitalState.assetCategories.filter((category) => category.name !== categoryName);
+  if (!remaining.length) {
+    alert("Нужна хотя бы одна категория капитала.");
+    return;
+  }
+  const fallback = "Другое";
+  if (!remaining.some((category) => category.name === fallback)) {
+    remaining.push({ name: fallback, subs: [] });
+  }
+  capitalState.assetCategories = remaining;
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName
+      ? { ...asset, category: fallback, subcategory: "", updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const renameCapitalSubcategory = (categoryName, oldName, newName) => {
+  const trimmed = newName.trim();
+  if (!trimmed || oldName === trimmed) {
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  if (!category) {
+    return;
+  }
+  category.subs = category.subs.map((item) => (item === oldName ? trimmed : item));
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName && asset.subcategory === oldName
+      ? { ...asset, subcategory: trimmed, updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const deleteCapitalSubcategory = (categoryName, subName) => {
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  if (!category) {
+    return;
+  }
+  category.subs = category.subs.filter((item) => item !== subName);
+  capitalState.assets = capitalState.assets.map((asset) => (
+    asset.category === categoryName && asset.subcategory === subName
+      ? { ...asset, subcategory: "", updatedAt: capitalNowIso() }
+      : asset
+  ));
+  saveCapitalV2(capitalState);
+  renderCapitalView();
+};
+
+const updateCapitalSubcategoryOptions = (categoryName, selectedValue = "") => {
+  if (!capitalAssetSubcategory) {
+    return;
+  }
+  const category = capitalState.assetCategories.find((item) => item.name === categoryName);
+  capitalAssetSubcategory.innerHTML = "<option value=''>Без подкатегории</option>";
+  if (category?.subs?.length) {
+    category.subs.forEach((sub) => {
+      const option = document.createElement("option");
+      option.value = sub;
+      option.textContent = sub;
+      capitalAssetSubcategory.appendChild(option);
+    });
+  }
+  if (selectedValue && ![...capitalAssetSubcategory.options].some((option) => option.value === selectedValue)) {
+    const extra = document.createElement("option");
+    extra.value = selectedValue;
+    extra.textContent = selectedValue;
+    capitalAssetSubcategory.appendChild(extra);
+  }
+  capitalAssetSubcategory.value = selectedValue || "";
+};
+
 const renderCapitalCategories = () => {
   if (!capitalCategoryManager) {
     return;
   }
   capitalCategoryManager.innerHTML = "";
-  capitalSubcategoryList.innerHTML = "";
 
   const sorted = capitalizeAssetCategories();
   sorted.forEach((category) => {
+    const card = document.createElement("div");
+    card.className = "category-card";
+    card.dataset.category = category.name;
+
+    const header = document.createElement("div");
+    header.className = "category-card-header";
+
+    const title = document.createElement("div");
+    title.innerHTML = `<strong>${category.name}</strong><span>${category.subs.length} подкатегорий</span>`;
+
+    const actions = document.createElement("div");
+    actions.className = "category-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.className = "chip";
+    renameBtn.textContent = "Переименовать";
+    renameBtn.dataset.capitalCategoryAction = "rename";
+    renameBtn.dataset.category = category.name;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "chip danger";
+    deleteBtn.textContent = "Удалить";
+    deleteBtn.dataset.capitalCategoryAction = "delete";
+    deleteBtn.dataset.category = category.name;
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+    header.appendChild(title);
+    header.appendChild(actions);
+
+    const list = document.createElement("div");
+    list.className = "subcategory-list";
+    list.dataset.category = category.name;
+
+    if (!category.subs.length) {
+      const empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = "Нет подкатегорий";
+      list.appendChild(empty);
+    }
+
     category.subs.forEach((sub) => {
-      const subOption = document.createElement("option");
-      subOption.value = sub;
-      capitalSubcategoryList.appendChild(subOption);
+      const row = document.createElement("div");
+      row.className = "subcategory-row";
+      row.dataset.category = category.name;
+      row.dataset.subcategory = sub;
+
+      const name = document.createElement("span");
+      name.textContent = sub;
+
+      const tools = document.createElement("div");
+      tools.className = "subcategory-tools";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "chip";
+      editBtn.textContent = "Редактировать";
+      editBtn.dataset.capitalSubcategoryAction = "rename";
+      editBtn.dataset.category = category.name;
+      editBtn.dataset.subcategory = sub;
+
+      const deleteBtnSub = document.createElement("button");
+      deleteBtnSub.className = "chip danger";
+      deleteBtnSub.textContent = "Удалить";
+      deleteBtnSub.dataset.capitalSubcategoryAction = "delete";
+      deleteBtnSub.dataset.category = category.name;
+      deleteBtnSub.dataset.subcategory = sub;
+
+      tools.appendChild(editBtn);
+      tools.appendChild(deleteBtnSub);
+
+      row.appendChild(name);
+      row.appendChild(tools);
+      list.appendChild(row);
     });
 
-    const card = document.createElement("div");
-    card.className = "capital-category-card";
-    card.innerHTML = `
-      <div class="capital-category-title">
-        <span>${category.name}</span>
-        <button class="button secondary" data-capital-category-delete="${category.name}">Удалить</button>
-      </div>
-    `;
-    const subs = document.createElement("div");
-    subs.className = "capital-category-subs";
-    if (!category.subs.length) {
-      subs.innerHTML = "<span class='hint'>Подкатегории не добавлены.</span>";
-    } else {
-      category.subs.forEach((sub) => {
-        const pill = document.createElement("span");
-        pill.className = "capital-subcategory";
-        pill.innerHTML = `
-          ${sub}
-          <button class="button secondary" data-capital-subcategory-delete="${category.name}" data-subcategory="${sub}">×</button>
-        `;
-        subs.appendChild(pill);
-      });
-    }
-    card.appendChild(subs);
+    card.appendChild(header);
+    card.appendChild(list);
     capitalCategoryManager.appendChild(card);
   });
+
+  const currentCategoryLabel = capitalTypeLabel(capitalAssetType?.value);
+  if (currentCategoryLabel) {
+    updateCapitalSubcategoryOptions(currentCategoryLabel, capitalAssetSubcategory?.value || "");
+  }
 };
 
 const renderCapitalAssets = () => {
-  capitalAssetsTable.innerHTML = "";
-  const items = capitalState.assets;
-  if (!items.length) {
-    const row = document.createElement("tr");
-    row.innerHTML = "<td colspan='10' class='hint'>Добавьте первый актив.</td>";
-    capitalAssetsTable.appendChild(row);
+  if (!capitalAssetsList) {
     return;
   }
-  const grouped = new Map();
-  items.forEach((item) => {
-    const category = capitalTypeLabel(item.type) || item.category || "Без категории";
-    if (!grouped.has(category)) {
-      grouped.set(category, new Map());
-    }
-    const subcategory = item.subcategory || "Без подкатегории";
-    if (!grouped.get(category).has(subcategory)) {
-      grouped.get(category).set(subcategory, []);
-    }
-    grouped.get(category).get(subcategory).push(item);
-  });
+  capitalAssetsList.innerHTML = "";
+  const items = capitalState.assets || [];
 
-  const buildAssetRow = (item) => {
-    const row = document.createElement("tr");
-    row.dataset.assetId = item.id;
-    row.classList.add("capital-asset-row");
-    const invested = item.invested ?? 0;
-    const profit = item.amount - invested;
-    const amountInBase = capitalToBase(item.amount, item.currency);
-    const amountLabel = amountInBase == null && capitalIsUnconvertible(item)
-      ? `нет курса для ${item.currency}`
-      : capitalFormatMoney(amountInBase ?? item.amount);
-    const expectedProfitLabel = item.expectedProfit != null && item.expectedProfit !== ""
-      ? (() => {
-        const converted = capitalToBase(item.expectedProfit, item.currency);
-        if (converted == null && capitalIsUnconvertible(item)) {
-          return `нет курса для ${item.currency}`;
-        }
-        return capitalFormatMoney(converted ?? item.expectedProfit);
-      })()
-      : "—";
-    const maturityLabel = item.type === "deposit" ? (item.maturityDate || "—") : "";
-    row.innerHTML = `
-      <td>${item.name}</td>
-      <td>${capitalTypeLabel(item.type)}</td>
-      <td>${item.currency}</td>
-      <td>
-        ${item.amount.toFixed(2)}
-        <div class="hint">${amountLabel}</div>
-      </td>
-      <td>${invested.toFixed(2)}</td>
-      <td>${profit.toFixed(2)}</td>
-      <td>${maturityLabel}</td>
-      <td>
-        ${item.expectedProfit != null ? item.expectedProfit.toFixed(2) : "—"}
-        <div class="hint">${expectedProfitLabel}</div>
-      </td>
-      <td>${capitalLiquidityLabel(item.liquidity)}</td>
-      <td>${item.note || "—"}</td>
-    `;
-    return row;
+  const buildFilterOptions = () => {
+    if (capitalAssetTypeFilter) {
+      const types = new Set(items.map((item) => item.type));
+      capitalAssetTypeFilter.innerHTML = "<option value='all'>Все типы</option>";
+      [...types].forEach((type) => {
+        const option = document.createElement("option");
+        option.value = type;
+        option.textContent = capitalTypeLabel(type) || type;
+        capitalAssetTypeFilter.appendChild(option);
+      });
+      capitalAssetTypeFilter.value = assetFilters.type;
+    }
+    if (capitalAssetLiquidityFilter) {
+      const liquidityValues = new Set(items.map((item) => item.liquidity || "high"));
+      capitalAssetLiquidityFilter.innerHTML = "<option value='all'>Вся ликвидность</option>";
+      [...liquidityValues].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = capitalLiquidityShort(value);
+        capitalAssetLiquidityFilter.appendChild(option);
+      });
+      capitalAssetLiquidityFilter.value = assetFilters.liquidity;
+    }
+  };
+  if (capitalAssetSortDir) {
+    capitalAssetSortDir.textContent = assetFilters.direction === "asc" ? "По возр." : "По убыв.";
+    capitalAssetSortDir.setAttribute("aria-pressed", assetFilters.direction === "asc" ? "true" : "false");
+  }
+  if (capitalAssetSearch) {
+    capitalAssetSearch.value = assetFilters.search;
+  }
+
+  const assetValueInBase = (asset, field) => {
+    const value = field === "invested" ? (asset.invested ?? asset.amount ?? 0) : asset.amount;
+    const converted = capitalToBase(value, asset.currency);
+    if (converted == null && capitalIsUnconvertible(asset)) {
+      return null;
+    }
+    return converted ?? value;
   };
 
-  grouped.forEach((subcategories, categoryName) => {
-    const categoryRow = document.createElement("tr");
-    categoryRow.className = "capital-table-section";
-    categoryRow.innerHTML = `<td colspan="10">${categoryName}</td>`;
-    capitalAssetsTable.appendChild(categoryRow);
+  const expectedValueInBase = (asset) => {
+    const raw = asset.expectedProfit;
+    if (raw == null || raw === "") {
+      return { value: null, missing: false };
+    }
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+      return { value: null, missing: false };
+    }
+    const converted = capitalToBase(parsed, asset.currency);
+    if (converted == null && capitalIsUnconvertible(asset)) {
+      return { value: null, missing: true };
+    }
+    return { value: converted ?? parsed, missing: false };
+  };
 
-    subcategories.forEach((assets, subcategoryName) => {
-      const subRow = document.createElement("tr");
-      subRow.className = "capital-table-subsection";
-      subRow.innerHTML = `<td colspan="10">${subcategoryName}</td>`;
-      capitalAssetsTable.appendChild(subRow);
-      assets.forEach((asset) => {
-        capitalAssetsTable.appendChild(buildAssetRow(asset));
-      });
-    });
+  const getProfitMeta = (amount, invested) => {
+    const profit = amount - invested;
+    const percent = invested > 0 ? (profit / invested) * 100 : null;
+    const isValid = Number.isFinite(percent) && Math.abs(percent) <= 999;
+    return { profit, percent: isValid ? percent : null, needsCheck: !isValid };
+  };
+
+  const filterAssets = items.filter((asset) => {
+    if (assetFilters.type !== "all" && asset.type !== assetFilters.type) {
+      return false;
+    }
+    if (assetFilters.liquidity !== "all" && asset.liquidity !== assetFilters.liquidity) {
+      return false;
+    }
+    if (assetFilters.search) {
+      const haystack = `${asset.name} ${asset.note || ""}`.toLowerCase();
+      if (!haystack.includes(assetFilters.search)) {
+        return false;
+      }
+    }
+    return true;
   });
 
+  const sortedAssets = filterAssets.slice().sort((a, b) => {
+    const direction = assetFilters.direction === "asc" ? 1 : -1;
+    if (assetFilters.sort === "name") {
+      return direction * a.name.localeCompare(b.name);
+    }
+    if (assetFilters.sort === "invested") {
+      return direction * ((assetValueInBase(a, "invested") ?? 0) - (assetValueInBase(b, "invested") ?? 0));
+    }
+    if (assetFilters.sort === "profit") {
+      const aProfit = (assetValueInBase(a, "amount") ?? 0) - (assetValueInBase(a, "invested") ?? 0);
+      const bProfit = (assetValueInBase(b, "amount") ?? 0) - (assetValueInBase(b, "invested") ?? 0);
+      return direction * (aProfit - bProfit);
+    }
+    return direction * ((assetValueInBase(a, "amount") ?? 0) - (assetValueInBase(b, "amount") ?? 0));
+  });
+
+  if (capitalAssetShown) {
+    capitalAssetShown.textContent = `Показано: ${sortedAssets.length}`;
+  }
+
+  const totals = sortedAssets.reduce(
+    (acc, asset) => {
+      const amount = assetValueInBase(asset, "amount");
+      const invested = assetValueInBase(asset, "invested");
+      const expected = expectedValueInBase(asset);
+      if (amount != null) {
+        acc.amount += amount;
+      }
+      if (invested != null) {
+        acc.invested += invested;
+      }
+      if (expected.value != null) {
+        acc.expected += expected.value;
+        acc.expectedCount += 1;
+      } else if (expected.missing) {
+        acc.expectedMissing = true;
+        acc.expectedCount += 1;
+      }
+      return acc;
+    },
+    { amount: 0, invested: 0, expected: 0, expectedCount: 0, expectedMissing: false }
+  );
+  const totalMeta = getProfitMeta(totals.amount, totals.invested);
+  if (capitalAssetsSummaryTotal) {
+    capitalAssetsSummaryTotal.textContent = capitalFormatMoney(totals.amount);
+  }
+  if (capitalAssetsSummaryInvested) {
+    capitalAssetsSummaryInvested.textContent = capitalFormatMoney(totals.invested);
+  }
+  if (capitalAssetsSummaryProfit) {
+    capitalAssetsSummaryProfit.textContent = capitalFormatMoney(totalMeta.profit);
+  }
+  const profitCard = capitalAssetsSummaryProfit?.closest(".summary-card");
+  if (profitCard) {
+    profitCard.classList.toggle("is-negative", totalMeta.profit < 0);
+    profitCard.classList.toggle("is-positive", totalMeta.profit >= 0);
+  }
+  if (capitalAssetsSummaryPercent) {
+    if (totalMeta.percent == null) {
+      capitalAssetsSummaryPercent.textContent = "—";
+      capitalAssetsSummaryPercent.classList.add("is-warning");
+    } else {
+      capitalAssetsSummaryPercent.textContent = `${totalMeta.percent.toFixed(1)}%`;
+      capitalAssetsSummaryPercent.classList.remove("is-warning");
+    }
+  }
+  if (capitalAssetsSummaryWarning) {
+    capitalAssetsSummaryWarning.classList.toggle("is-hidden", totalMeta.percent != null);
+  }
+  if (capitalAssetsSummaryExpected) {
+    capitalAssetsSummaryExpected.textContent = capitalFormatMoney(totals.expected);
+  }
+  if (capitalAssetsSummaryExpectedNote) {
+    if (!totals.expectedCount) {
+      capitalAssetsSummaryExpectedNote.textContent = "—";
+      capitalAssetsSummaryExpectedNote.classList.remove("is-warning", "is-info");
+    } else if (totals.expectedMissing) {
+      capitalAssetsSummaryExpectedNote.textContent = "нет курса";
+      capitalAssetsSummaryExpectedNote.classList.add("is-warning");
+      capitalAssetsSummaryExpectedNote.classList.remove("is-info");
+    } else {
+      capitalAssetsSummaryExpectedNote.textContent = `в ${capitalState.settings.baseCurrency}`;
+      capitalAssetsSummaryExpectedNote.classList.add("is-info");
+      capitalAssetsSummaryExpectedNote.classList.remove("is-warning");
+    }
+  }
+
+  buildFilterOptions();
+
+  if (!sortedAssets.length) {
+    capitalAssetsList.innerHTML = `
+      <div class="asset-empty">
+        <p>Нет активов по выбранным фильтрам.</p>
+        <button class="button secondary" data-action="add-asset">Добавить актив</button>
+      </div>
+    `;
+    return;
+  }
+
+  const grouped = new Map();
+  sortedAssets.forEach((asset) => {
+    const typeLabel = capitalTypeLabel(asset.type) || "Без типа";
+    if (!grouped.has(typeLabel)) {
+      grouped.set(typeLabel, new Map());
+    }
+    const subcategory = asset.subcategory || "Без подкатегории";
+    if (!grouped.get(typeLabel).has(subcategory)) {
+      grouped.get(typeLabel).set(subcategory, []);
+    }
+    grouped.get(typeLabel).get(subcategory).push(asset);
+  });
+
+  const renderGroupTotals = (assets) => {
+    return assets.reduce(
+      (acc, asset) => {
+        const amount = assetValueInBase(asset, "amount");
+        const invested = assetValueInBase(asset, "invested");
+        acc.amount += amount ?? 0;
+        acc.invested += invested ?? 0;
+        return acc;
+      },
+      { amount: 0, invested: 0 }
+    );
+  };
+
+  grouped.forEach((subcategories, groupName) => {
+    const groupAssets = [...subcategories.values()].flat();
+    const totalsGroup = renderGroupTotals(groupAssets);
+    const groupMeta = getProfitMeta(totalsGroup.amount, totalsGroup.invested);
+    const isGroupOpen = assetUiState.groups[groupName] ?? true;
+    const groupCard = document.createElement("div");
+    groupCard.className = "asset-group";
+    groupCard.innerHTML = `
+      <div class="asset-group-header">
+        <button class="asset-group-toggle" data-action="toggle-group" data-group="${groupName}" aria-expanded="${isGroupOpen}" type="button">
+          <span>
+            <h4>${groupName}</h4>
+            <span class="asset-count">${groupAssets.length} актив(а)</span>
+          </span>
+          <span class="asset-group-totals">
+            <strong>${capitalFormatMoney(totalsGroup.amount)}</strong>
+            <span class="asset-profit ${groupMeta.profit < 0 ? "is-negative" : ""}">
+              ${capitalFormatMoney(groupMeta.profit)}
+            </span>
+          </span>
+          <span class="chevron">›</span>
+        </button>
+      </div>
+    `;
+
+    const subgroupContainer = document.createElement("div");
+    subgroupContainer.className = `asset-subgroup-list${isGroupOpen ? "" : " is-collapsed"}`;
+
+    subcategories.forEach((assets, subcategoryName) => {
+      const totalsSub = renderGroupTotals(assets);
+      const subMeta = getProfitMeta(totalsSub.amount, totalsSub.invested);
+      const subKey = `${groupName}::${subcategoryName}`;
+      const isSubOpen = assetUiState.subgroups[subKey] ?? true;
+      const subSection = document.createElement("div");
+      subSection.className = "asset-subgroup";
+      subSection.innerHTML = `
+        <div class="asset-subgroup-header">
+          <button class="asset-subgroup-toggle" data-action="toggle-subgroup" data-group="${groupName}" data-subgroup="${subcategoryName}" aria-expanded="${isSubOpen}" type="button">
+            <span>
+              <h5>${subcategoryName}</h5>
+              <span class="asset-count">${assets.length} актив(а)</span>
+            </span>
+            <span class="asset-group-totals">
+              <strong>${capitalFormatMoney(totalsSub.amount)}</strong>
+              <span class="asset-profit ${subMeta.profit < 0 ? "is-negative" : ""}">
+                ${capitalFormatMoney(subMeta.profit)}
+              </span>
+            </span>
+            <span class="chevron">›</span>
+          </button>
+        </div>
+      `;
+
+      const list = document.createElement("div");
+      list.className = `asset-items${isSubOpen ? "" : " is-collapsed"}`;
+
+      assets.forEach((asset) => {
+        const amountBase = assetValueInBase(asset, "amount");
+        const investedBase = assetValueInBase(asset, "invested");
+        const hasRate = amountBase != null && investedBase != null;
+        const amountLabel = amountBase == null
+          ? `нет курса для ${asset.currency}`
+          : capitalFormatMoney(amountBase);
+        const investedLabel = investedBase == null
+          ? `нет курса`
+          : capitalFormatMoney(investedBase);
+        const profitMeta = getProfitMeta(amountBase ?? 0, investedBase ?? 0);
+        const profitLabel = amountBase == null || investedBase == null
+          ? "—"
+          : capitalFormatMoney(profitMeta.profit);
+        const percentLabel = profitMeta.percent == null ? "—" : `${profitMeta.percent.toFixed(1)}%`;
+        const showPercentWarning = profitMeta.percent == null && hasRate;
+        const liquidityLabel = capitalLiquidityShort(asset.liquidity);
+        const expectedData = expectedValueInBase(asset);
+        const expectedParsed = asset.expectedProfit != null && asset.expectedProfit !== ""
+          ? Number.parseFloat(asset.expectedProfit)
+          : null;
+        const expectedRaw = Number.isFinite(expectedParsed) ? expectedParsed : null;
+        let expectedLabel = "—";
+        if (asset.expectedProfit != null && asset.expectedProfit !== "") {
+          if (expectedData.value == null && expectedData.missing) {
+            expectedLabel = `нет курса`;
+          } else if (expectedData.value == null && expectedRaw == null) {
+            expectedLabel = "—";
+          } else {
+            expectedLabel = capitalFormatMoney(expectedData.value ?? expectedRaw);
+          }
+        }
+        const expectedMarkup = asset.expectedProfit != null && asset.expectedProfit !== ""
+          ? `<span class="asset-expected">ожид. ${expectedLabel}</span>`
+          : "";
+        const iconLetter = (asset.name || "?").trim().charAt(0).toUpperCase();
+        const iconValue = asset.icon || capitalDefaultIcon(asset.type);
+        const avatarMarkup = asset.avatarDataUrl
+          ? `<img src="${asset.avatarDataUrl}" alt="" />`
+          : `<span>${iconValue || iconLetter}</span>`;
+        const detailId = `asset-details-${asset.id}`;
+        const missingRateChip = hasRate ? "" : "<span class='chip chip-missing'>нет курса</span>";
+
+        const card = document.createElement("div");
+        card.className = "asset-item";
+        card.dataset.assetId = asset.id;
+        card.innerHTML = `
+          <div class="asset-row" data-action="toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="${detailId}">
+            <span class="asset-avatar">${avatarMarkup}</span>
+            <span class="asset-main">
+              <span class="asset-title">${asset.name}</span>
+              <span class="asset-meta">${capitalTypeLabel(asset.type)} • ${asset.currency}</span>
+            </span>
+            <span class="asset-values">
+              <span class="asset-amount">${amountLabel}</span>
+              <span class="asset-invested">вложено ${investedLabel}</span>
+              ${missingRateChip}
+            </span>
+            <span class="asset-profit-block">
+              <span class="asset-profit ${profitMeta.profit < 0 ? "is-negative" : ""}">${profitLabel}</span>
+              <span class="asset-profit-percent ${showPercentWarning ? "is-warning" : ""}">
+                ${percentLabel}
+              </span>
+              ${expectedMarkup}
+            </span>
+            <span class="chip chip-liquidity">${liquidityLabel}</span>
+            <span class="asset-quick-actions">
+              <button class="chip" data-action="edit-asset" data-id="${asset.id}" type="button" aria-label="Редактировать">✎</button>
+              <button class="chip danger" data-action="delete-asset" data-id="${asset.id}" type="button" aria-label="Удалить">🗑</button>
+            </span>
+            <span class="chevron">›</span>
+          </div>
+          <div id="${detailId}" class="asset-details" hidden>
+            <div class="k">Дата окончания</div>
+            <div class="v">${asset.maturityDate || "—"}</div>
+            <div class="k">Потенц. доходность</div>
+            <div class="v">${
+              asset.expectedProfit != null && asset.expectedProfit !== ""
+                ? expectedData.value == null && expectedData.missing
+                  ? `нет курса для ${asset.currency}`
+                  : expectedData.value == null && expectedRaw == null
+                    ? "—"
+                    : `${capitalFormatMoney(expectedData.value ?? expectedRaw)}${
+                      asset.currency !== capitalState.settings.baseCurrency && expectedData.value != null && expectedRaw != null
+                        ? ` (${expectedRaw.toFixed(2)} ${asset.currency})`
+                        : ""
+                    }`
+                : "—"
+            }</div>
+            <div class="k">Комментарий</div>
+            <div class="v">${asset.note || "—"}</div>
+            <div class="k">Валюта</div>
+            <div class="v">${asset.currency}</div>
+            <div class="asset-details-actions">
+              <button class="button secondary" data-action="edit-asset" data-id="${asset.id}">Редактировать</button>
+              <button class="button danger" data-action="delete-asset" data-id="${asset.id}">Удалить</button>
+              ${showPercentWarning ? "<span class='chip chip-warning'>проверь данные</span>" : ""}
+            </div>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+
+      subSection.appendChild(list);
+      subgroupContainer.appendChild(subSection);
+    });
+
+    groupCard.appendChild(subgroupContainer);
+    capitalAssetsList.appendChild(groupCard);
+  });
 };
 
 const debtMetrics = () => {
@@ -1937,7 +2743,7 @@ const goalMonthlyDelta = (goal) => {
 const goalStatus = (goal) => {
   const snapshots = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   const recent = snapshots.slice(-3);
   if (recent.length < 2) {
     return "нет данных";
@@ -1983,7 +2789,7 @@ const renderCapitalSnapshots = () => {
   }
   const sorted = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   sorted.forEach((item) => {
     const row = document.createElement("tr");
     row.dataset.snapshotMonth = item.month;
@@ -2004,7 +2810,7 @@ const renderCapitalHistoryChart = () => {
   capitalSnapshotsChart.innerHTML = "";
   const sorted = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort((a, b) => compareSnapshotMonth(a, b));
   if (!sorted.length) {
     capitalSnapshotsChart.innerHTML = "<text x='50%' y='50%' text-anchor='middle' fill='#94a3b8'>Нет данных</text>";
     return;
@@ -2076,6 +2882,7 @@ const renderCapitalView = () => {
   capitalEnsureSnapshot();
   renderCapitalSummary();
   renderCapitalOverviewDashboard();
+  renderCapitalStructureCharts();
   renderCapitalAssets();
   renderCapitalDebts();
   renderCapitalPayoff();
@@ -2110,29 +2917,26 @@ const capitalSetAssetDrawer = (isOpen) => {
     return;
   }
   capitalAssetDrawer.classList.toggle("is-open", isOpen);
+  capitalAssetDrawer.setAttribute("aria-hidden", String(!isOpen));
   if (capitalAssetToggle) {
     capitalAssetToggle.setAttribute("aria-expanded", String(isOpen));
-    capitalAssetToggle.textContent = isOpen ? "Скрыть форму" : "Добавить новый актив";
+    capitalAssetToggle.textContent = "Добавить актив";
   }
   capitalAssetToggleButtons.forEach((button) => {
     button.setAttribute("aria-expanded", String(isOpen));
-    button.textContent = isOpen ? "Скрыть форму" : "Открыть форму";
+    button.textContent = "Открыть форму";
   });
 };
 
 const capitalSetAssetModal = (isOpen) => {
-  if (!capitalAssetDrawer) {
-    return;
-  }
-  capitalAssetDrawer.classList.toggle("is-modal", isOpen);
   if (capitalAssetOverlay) {
-    capitalAssetOverlay.classList.toggle("is-active", isOpen);
+    capitalAssetOverlay.classList.toggle("is-open", isOpen);
   }
   document.body.classList.toggle("modal-open", isOpen);
 };
 
 const capitalIsAssetModalOpen = () =>
-  capitalAssetDrawer ? capitalAssetDrawer.classList.contains("is-modal") : false;
+  capitalAssetDrawer ? capitalAssetDrawer.classList.contains("is-open") : false;
 
 const capitalUpdateAsset = (id, field, value) => {
   const asset = capitalState.assets.find((item) => item.id === id);
@@ -2170,7 +2974,6 @@ const capitalUpdateAsset = (id, field, value) => {
     renderCapitalCategories();
   }
   renderCapitalSummary();
-  renderCapitalLedger();
   renderCapitalStructureCharts();
   renderCapitalOverview();
 };
@@ -2189,7 +2992,6 @@ const capitalUpdateDebt = (id, field, value) => {
   debt.updatedAt = capitalNowIso();
   saveCapitalV2(capitalState);
   renderCapitalSummary();
-  renderCapitalLedger();
   renderCapitalStructureCharts();
   renderCapitalOverview();
   renderCapitalDebts();
@@ -2211,13 +3013,28 @@ const capitalResetAssetForm = () => {
   capitalAssetMaturityDate.value = "";
   capitalAssetSubcategory.value = "";
   capitalAssetExpectedProfit.value = "";
+  if (capitalAssetIcon) {
+    capitalAssetIcon.value = "";
+  }
+  if (capitalAssetAvatar) {
+    capitalAssetAvatar.value = "";
+  }
+  capitalAssetAvatarDataUrl = "";
+  updateCapitalAssetAvatarPreview("");
   capitalEditingAssetId = null;
+  const categoryLabel = capitalTypeLabel(capitalAssetType.value);
+  if (categoryLabel) {
+    updateCapitalSubcategoryOptions(categoryLabel, "");
+  }
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.textContent = "Добавить актив";
   }
   if (capitalAssetDelete) {
     capitalAssetDelete.classList.remove("is-visible");
+  }
+  if (capitalAssetDrawerTitle) {
+    capitalAssetDrawerTitle.textContent = "Новый актив";
   }
 };
 
@@ -2229,11 +3046,16 @@ const capitalFillAssetForm = (asset) => {
   capitalAssetCurrency.value = asset.currency || capitalState.settings.baseCurrency;
   capitalAssetAmount.value = asset.amount ?? 0;
   capitalAssetInvested.value = asset.invested ?? asset.amount ?? 0;
-  capitalAssetSubcategory.value = asset.subcategory || "";
+  updateCapitalSubcategoryOptions(capitalTypeLabel(asset.type), asset.subcategory || "");
   capitalAssetMaturityDate.value = asset.maturityDate || "";
   capitalAssetLiquidity.value = asset.liquidity || "high";
   capitalAssetExpectedProfit.value = asset.expectedProfit ?? "";
   capitalAssetNote.value = asset.note || "";
+  if (capitalAssetIcon) {
+    capitalAssetIcon.value = asset.icon || "";
+  }
+  capitalAssetAvatarDataUrl = asset.avatarDataUrl || "";
+  updateCapitalAssetAvatarPreview(capitalAssetAvatarDataUrl);
   capitalEditingAssetId = asset.id;
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
@@ -2241,6 +3063,12 @@ const capitalFillAssetForm = (asset) => {
   }
   if (capitalAssetDelete) {
     capitalAssetDelete.classList.add("is-visible");
+  }
+  if (capitalAssetDrawerTitle) {
+    capitalAssetDrawerTitle.textContent = "Редактирование";
+  }
+  if (capitalAssetName) {
+    capitalAssetName.focus();
   }
 };
 
@@ -2250,6 +3078,7 @@ const capitalAddAsset = () => {
   const investedInput = capitalAssetInvested.value;
   const invested = Number.parseFloat(investedInput);
   if (!name || Number.isNaN(invested)) {
+    showError("Заполните название и сумму актива.");
     return;
   }
   const subcategoryValue = capitalAssetSubcategory.value.trim();
@@ -2275,6 +3104,8 @@ const capitalAddAsset = () => {
       : null,
     maturityDate: isDeposit ? capitalAssetMaturityDate.value : "",
     note: capitalAssetNote.value.trim(),
+    icon: capitalAssetIcon ? capitalAssetIcon.value.trim() : "",
+    avatarDataUrl: capitalAssetAvatarDataUrl || "",
   };
   if (capitalEditingAssetId) {
     const existing = capitalState.assets.find((item) => item.id === capitalEditingAssetId);
@@ -2289,6 +3120,7 @@ const capitalAddAsset = () => {
     capitalState.assets.push({
       id: capitalGenerateId("asset"),
       ...payload,
+      createdAt: capitalNowIso(),
       updatedAt: capitalNowIso(),
     });
     ensureFxRateForCurrency(capitalState.assets[capitalState.assets.length - 1].currency);
@@ -2302,6 +3134,7 @@ const capitalAddAsset = () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
   }
+  showToast("Сохранено");
   renderCapitalView();
 };
 
@@ -2309,6 +3142,7 @@ const capitalAddDebt = () => {
   const name = capitalDebtName.value.trim();
   const principal = Number.parseFloat(capitalDebtPrincipal.value);
   if (!name || Number.isNaN(principal)) {
+    showError("Заполните название и сумму долга.");
     return;
   }
   capitalState.debts.push({
@@ -2334,6 +3168,7 @@ const capitalAddGoal = () => {
   const targetAmount = Number.parseFloat(capitalGoalTarget.value);
   const targetDate = capitalGoalDate.value;
   if (!name || Number.isNaN(targetAmount) || !targetDate) {
+    showError("Заполните название цели, сумму и дату.");
     return;
   }
   capitalState.goals.push({
@@ -2344,6 +3179,7 @@ const capitalAddGoal = () => {
     targetDate,
     baselineAmount: capitalGoalBaseline.value ? Number.parseFloat(capitalGoalBaseline.value) : null,
     note: capitalGoalNote.value.trim(),
+    updatedAt: capitalNowIso(),
   });
   saveCapitalV2(capitalState);
   capitalGoalForm.reset();
@@ -2355,7 +3191,7 @@ const capitalCreateSnapshotNow = () => {
   const totals = capitalTotals();
   const last = capitalState.snapshots
     .slice()
-    .sort((a, b) => a.month.localeCompare(b.month))
+    .sort((a, b) => compareSnapshotMonth(a, b))
     .filter((item) => item.month !== month)
     .pop();
   const delta = last ? totals.netWorth - last.netWorth : 0;
@@ -2365,14 +3201,17 @@ const capitalCreateSnapshotNow = () => {
     existing.debtsTotal = totals.debtsTotal;
     existing.netWorth = totals.netWorth;
     existing.delta = delta;
+    existing.updatedAt = capitalNowIso();
   } else {
     capitalState.snapshots.push({
+      id: capitalGenerateId("snapshot"),
       month,
       assetsTotal: totals.assetsTotal,
       debtsTotal: totals.debtsTotal,
       netWorth: totals.netWorth,
       delta,
       note: "",
+      updatedAt: capitalNowIso(),
     });
   }
   saveCapitalV2(capitalState);
@@ -2385,8 +3224,6 @@ const addCategory = () => {
   if (!name) {
     return;
   }
-
-  pushHistory();
 
   if (categories[name]) {
     if (subName && !categories[name].subs.includes(subName)) {
@@ -2409,14 +3246,13 @@ const renameCategory = (oldName, newName) => {
   if (!newName || oldName === newName || categories[newName]) {
     return;
   }
-  pushHistory();
   const payload = categories[oldName];
   delete categories[oldName];
   categories[newName] = payload;
   transactions = transactions.map((item) =>
-    item.category === oldName ? { ...item, category: newName } : item
+    item.category === oldName ? touchTransaction(item, { category: newName }) : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2425,16 +3261,15 @@ const renameSubcategory = (categoryName, oldName, newName) => {
   if (!newName || oldName === newName) {
     return;
   }
-  pushHistory();
   categories[categoryName].subs = categories[categoryName].subs.map((item) =>
     item === oldName ? newName : item
   );
   transactions = transactions.map((item) =>
     item.category === categoryName && item.subcategory === oldName
-      ? { ...item, subcategory: newName }
+      ? touchTransaction(item, { subcategory: newName })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2443,7 +3278,6 @@ const moveSubcategory = (fromCategory, subName, toCategory) => {
   if (fromCategory === toCategory) {
     return;
   }
-  pushHistory();
   categories[fromCategory].subs = categories[fromCategory].subs.filter(
     (item) => item !== subName
   );
@@ -2452,10 +3286,10 @@ const moveSubcategory = (fromCategory, subName, toCategory) => {
   }
   transactions = transactions.map((item) =>
     item.category === fromCategory && item.subcategory === subName
-      ? { ...item, category: toCategory }
+      ? touchTransaction(item, { category: toCategory })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2464,7 +3298,6 @@ const moveCategoryToCategory = (fromCategory, toCategory) => {
   if (fromCategory === toCategory) {
     return;
   }
-  pushHistory();
   const fromSubs = categories[fromCategory].subs || [];
   const toSubs = categories[toCategory].subs || [];
   const merged = [...new Set([...toSubs, fromCategory, ...fromSubs])];
@@ -2476,10 +3309,10 @@ const moveCategoryToCategory = (fromCategory, toCategory) => {
       return item;
     }
     const nextSubcategory = item.subcategory || fromCategory;
-    return { ...item, category: toCategory, subcategory: nextSubcategory };
+    return touchTransaction(item, { category: toCategory, subcategory: nextSubcategory });
   });
 
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2488,7 +3321,6 @@ const promoteSubcategoryToCategory = (fromCategory, subName) => {
   if (categories[subName]) {
     return;
   }
-  pushHistory();
   categories[fromCategory].subs = categories[fromCategory].subs.filter(
     (item) => item !== subName
   );
@@ -2496,26 +3328,25 @@ const promoteSubcategoryToCategory = (fromCategory, subName) => {
 
   transactions = transactions.map((item) =>
     item.category === fromCategory && item.subcategory === subName
-      ? { ...item, category: subName, subcategory: "" }
+      ? touchTransaction(item, { category: subName, subcategory: "" })
       : item
   );
 
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
 
 const deleteSubcategory = (categoryName, subName) => {
-  pushHistory();
   categories[categoryName].subs = categories[categoryName].subs.filter(
     (item) => item !== subName
   );
   transactions = transactions.map((item) =>
     item.category === categoryName && item.subcategory === subName
-      ? { ...item, subcategory: "" }
+      ? touchTransaction(item, { subcategory: "" })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2526,13 +3357,12 @@ const deleteCategory = (categoryName) => {
     alert("Нужна хотя бы одна категория.");
     return;
   }
-  pushHistory();
   delete categories[categoryName];
   const fallback = remaining[0];
   transactions = transactions.map((item) =>
-    item.category === categoryName ? { ...item, category: fallback, subcategory: "" } : item
+    item.category === categoryName ? touchTransaction(item, { category: fallback, subcategory: "" }) : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2743,11 +3573,29 @@ const handleDrop = (event) => {
   }
 };
 
-const render = () => {
-  updateSummary();
-  renderTable();
-  renderCharts();
-  renderReports();
+const render = (viewId = activeView) => {
+  if (viewId === "dashboard") {
+    updateSummary();
+    renderCharts();
+    return;
+  }
+  if (viewId === "transactions") {
+    updateSummary();
+    renderTable();
+    return;
+  }
+  if (viewId === "categories") {
+    renderCategories();
+    return;
+  }
+  if (viewId === "reports") {
+    updateSummary();
+    renderReports();
+    return;
+  }
+  if (viewId === "capital") {
+    renderCapitalView();
+  }
 };
 
 const initializeReportRange = () => {
@@ -2772,158 +3620,278 @@ const resetForm = () => {
   }
 };
 
+const resetTransactionFormToAdd = () => {
+  if (!form) {
+    return;
+  }
+  form.reset();
+  renderCategoryOptions();
+  resetForm();
+  setTransactionFormMode("add");
+  updateTransactionFormState();
+};
+
+const transactionSubmitButton = form?.querySelector("button[type='submit']");
+
+const updateTransactionFormState = () => {
+  if (!form || !transactionSubmitButton) {
+    return;
+  }
+  const date = document.getElementById("date")?.value;
+  const category = categorySelect?.value;
+  const amount = Number.parseFloat(document.getElementById("amount")?.value);
+  const isValid = Boolean(date) && Boolean(category) && Number.isFinite(amount) && amount > 0;
+  transactionSubmitButton.disabled = !isValid;
+};
+
+const populateTransactionForm = (transaction) => {
+  const dateInput = document.getElementById("date");
+  const typeInput = document.getElementById("type");
+  const amountInput = document.getElementById("amount");
+  const noteInput = document.getElementById("note");
+  if (!transaction || !dateInput || !typeInput || !amountInput || !noteInput) {
+    return;
+  }
+  typeInput.value = transaction.type;
+  renderCategoryOptions();
+  categorySelect.value = transaction.category;
+  updateSubcategoryOptions(transaction.category);
+  if (transaction.subcategory) {
+    ensureSubcategoryOption(transaction.subcategory);
+  } else {
+    subcategorySelect.value = "";
+  }
+  dateInput.value = transaction.date;
+  amountInput.value = transaction.amount;
+  noteInput.value = transaction.note || "";
+};
+
 const setView = (viewId) => {
-  const page = document.body.dataset.page || "main";
-  if (viewId === "capital" && page === "main") {
-    window.location.href = "capital.html";
-    return;
-  }
-  if (viewId !== "capital" && page === "capital") {
-    window.location.href = `index.html?view=${viewId}`;
-    return;
-  }
+  const availableViews = [...views].map((view) => view.dataset.view);
+  const targetView = availableViews.includes(viewId) ? viewId : "dashboard";
+  activeView = targetView;
   views.forEach((view) => {
-    view.classList.toggle("is-active", view.dataset.view === viewId);
+    view.classList.toggle("is-active", view.dataset.view === targetView);
   });
   navLinks.forEach((link) => {
-    link.classList.toggle("is-active", link.dataset.viewTarget === viewId);
+    link.classList.toggle("is-active", link.dataset.viewTarget === targetView);
   });
-  const activeLabel = [...navLinks].find((link) => link.dataset.viewTarget === viewId);
+  const activeLabel = [...navLinks].find((link) => link.dataset.viewTarget === targetView);
   if (activeLabel) {
     viewTitle.textContent = activeLabel.textContent;
   }
-  dbSet(VIEW_KEY, viewId);
-  if (viewId === "capital") {
-    renderCapitalView();
-  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", targetView);
+  window.history.replaceState({}, "", url);
+  Storage.set(VIEW_KEY, targetView);
+  render(targetView);
 };
 
 const setLayout = (layout) => {
   document.body.classList.remove("layout-comfort", "layout-balanced", "layout-compact");
   document.body.classList.add(`layout-${layout}`);
+  currentLayout = layout;
   layoutButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.layout === layout);
   });
-  dbSet(LAYOUT_KEY, layout);
+  Storage.set(LAYOUT_KEY, layout);
 };
 
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const date = document.getElementById("date").value;
-  const type = document.getElementById("type").value;
-  const category = categorySelect.value;
-  const subcategory = subcategorySelect.value || "";
-  const amount = Number.parseFloat(document.getElementById("amount").value);
-  const note = document.getElementById("note").value.trim();
+const bindEvents = () => {
+  const on = (element, event, handler, context) => {
+    if (!element) {
+      return;
+    }
+    element.addEventListener(event, safeExec(handler, context || event));
+  };
+  const onAll = (list, event, handler, context) => {
+    if (!list || list.length === 0) {
+      return;
+    }
+    list.forEach((element) => on(element, event, handler, context));
+  };
+  if (form) {
+    form.addEventListener("submit", safeExec((event) => {
+      event.preventDefault();
+      const date = document.getElementById("date").value;
+      const type = document.getElementById("type").value;
+      const category = categorySelect.value;
+      const subcategory = subcategorySelect.value || "";
+      const amount = Number.parseFloat(document.getElementById("amount").value);
+      const note = document.getElementById("note").value.trim();
 
-  if (!date || !category || Number.isNaN(amount)) {
-    return;
+      if (!date || !category || Number.isNaN(amount) || amount <= 0) {
+        showError("Заполните дату, категорию и сумму больше нуля.");
+        return;
+      }
+
+      const now = new Date().toISOString();
+      if (editingTransactionId) {
+        const index = transactions.findIndex((item) => item.id === editingTransactionId);
+        if (index === -1) {
+          showError("Операция для редактирования не найдена.");
+          resetTransactionFormToAdd();
+          return;
+        }
+        const before = { ...transactions[index] };
+        const updated = touchTransaction(before, {
+          date,
+          type,
+          category,
+          subcategory,
+          amount,
+          note,
+        });
+        transactions[index] = updated;
+        recordUndo("editTx", { before, after: updated });
+        Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+        render(activeView);
+        resetTransactionFormToAdd();
+        return;
+      }
+
+      transactions.push({
+        id: generateId("tx"),
+        date,
+        type,
+        category,
+        subcategory,
+        amount,
+        note,
+        createdAt: now,
+        updatedAt: now,
+      });
+      recordUndo("addTx", { id: transactions[transactions.length - 1].id });
+      Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+      render(activeView);
+      resetTransactionFormToAdd();
+    }, "добавление операции"));
+    const formFields = form.querySelectorAll("input, select");
+    formFields.forEach((field) => {
+      on(field, "input", updateTransactionFormState, "валидация формы");
+      on(field, "change", updateTransactionFormState, "валидация формы");
+    });
   }
 
-  pushHistory();
-  transactions.push({ date, type, category, subcategory, amount, note });
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
-  render();
-  resetForm();
-});
+  on(transactionCancelButton, "click", () => {
+    resetTransactionFormToAdd();
+  }, "отмена редактирования");
 
-document.getElementById("type").addEventListener("change", () => {
+on(document.getElementById("type"), "change", () => {
   renderCategoryOptions();
-});
+}, "смена типа операции");
 
-categorySelect.addEventListener("change", (event) => {
+on(categorySelect, "change", (event) => {
   updateSubcategoryOptions(event.target.value);
-});
+}, "смена категории");
 
-addCategoryButton.addEventListener("click", addCategory);
+on(addCategoryButton, "click", addCategory, "добавление категории");
 
-categoryTypeSelect.addEventListener("change", () => {
+on(categoryTypeSelect, "change", () => {
   renderCategoryListOptions();
-});
+}, "тип категории");
 
-newCategoryInput.addEventListener("input", () => {
+on(newCategoryInput, "input", () => {
   const name = newCategoryInput.value.trim();
   if (categories[name]) {
     categoryTypeSelect.value = categories[name].type;
     renderCategoryListOptions();
   }
-});
+}, "ввод категории");
 
-newCategoryInput.addEventListener("keydown", (event) => {
+on(newCategoryInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     addCategory();
   }
-});
+}, "ввод категории");
 
-newSubcategoryInput.addEventListener("keydown", (event) => {
+on(newSubcategoryInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     addCategory();
   }
-});
+}, "ввод подкатегории");
 
-navLinks.forEach((link) => {
-  link.addEventListener("click", (event) => {
-    event.preventDefault();
-    setView(link.dataset.viewTarget);
+onAll(navLinks, "click", (event) => {
+  event.preventDefault();
+  setView(event.currentTarget.dataset.viewTarget);
+}, "навигация");
+
+onAll(layoutButtons, "click", (event) => setLayout(event.currentTarget.dataset.layout), "layout");
+
+onAll(filterTabs, "click", (event) => {
+  filterTabs.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  categoryFilter = event.currentTarget.dataset.filter;
+  renderCategoryManager();
+}, "фильтр категорий");
+
+onAll(categoryScopeButtons, "click", (event) => {
+  categoryScopeButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  const scope = event.currentTarget.dataset.categoryScope;
+  categoryPanels.forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.categoryPanel === scope);
   });
-});
+}, "переключение панели");
 
-layoutButtons.forEach((button) => {
-  button.addEventListener("click", () => setLayout(button.dataset.layout));
-});
+on(categoryManager, "dragstart", handleDragStart, "dragstart");
+on(categoryManager, "dragend", handleDragEnd, "dragend");
+on(categoryManager, "dragover", handleDragOver, "dragover");
+on(categoryManager, "dragleave", handleDragLeave, "dragleave");
+on(categoryManager, "drop", handleDrop, "drop");
+on(rootDropzone, "dragover", handleDragOver, "dragover");
+on(rootDropzone, "dragleave", handleDragLeave, "dragleave");
+on(rootDropzone, "drop", handleDrop, "drop");
+on(rootDropzone, "dragend", handleDragEnd, "dragend");
 
-filterTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    filterTabs.forEach((item) => item.classList.remove("is-active"));
-    tab.classList.add("is-active");
-    categoryFilter = tab.dataset.filter;
-    renderCategoryManager();
-  });
-});
+on(undoButton, "click", undoLastAction, "undo");
 
-categoryScopeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    categoryScopeButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const scope = button.dataset.categoryScope;
-    categoryPanels.forEach((panel) => {
-      panel.classList.toggle("is-active", panel.dataset.categoryPanel === scope);
-    });
-  });
-});
+  on(tableBody, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
 
-categoryManager.addEventListener("dragstart", handleDragStart);
-categoryManager.addEventListener("dragend", handleDragEnd);
-categoryManager.addEventListener("dragover", handleDragOver);
-categoryManager.addEventListener("dragleave", handleDragLeave);
-categoryManager.addEventListener("drop", handleDrop);
-rootDropzone.addEventListener("dragover", handleDragOver);
-rootDropzone.addEventListener("dragleave", handleDragLeave);
-rootDropzone.addEventListener("drop", handleDrop);
-rootDropzone.addEventListener("dragend", handleDragEnd);
+    const id = target.dataset.id;
+    if (!id) {
+      return;
+    }
 
-undoButton.addEventListener("click", undoLastAction);
+    const action = target.dataset.action;
+    if (action === "edit") {
+      const transaction = transactions.find((item) => item.id === id);
+      if (!transaction) {
+        showError("Операция для редактирования не найдена.");
+        return;
+      }
+      setTransactionFormMode("edit", transaction);
+      populateTransactionForm(transaction);
+      updateTransactionFormState();
+      form?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
 
-tableBody.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
+    if (action !== "delete") {
+      return;
+    }
 
-  const index = Number.parseInt(target.dataset.index, 10);
-  if (Number.isNaN(index)) {
-    return;
-  }
+    const index = transactions.findIndex((item) => item.id === id);
+    const deleted = transactions.find((item) => item.id === id);
+    if (!deleted) {
+      return;
+    }
+    transactions = transactions.filter((item) => item.id !== id);
+    recordUndo("deleteTx", { item: deleted, index });
+    if (editingTransactionId === id) {
+      resetTransactionFormToAdd();
+    }
+    Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+    render(activeView);
+  }, "удаление операции");
 
-  pushHistory();
-  transactions.splice(index, 1);
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
-  render();
-});
-
-exportButton.addEventListener("click", () => {
+on(exportButton, "click", () => {
   if (transactions.length === 0) {
     alert("Добавьте операции перед экспортом.");
     return;
@@ -2954,112 +3922,126 @@ exportButton.addEventListener("click", () => {
   link.download = `budget-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-});
+}, "экспорт CSV");
 
-clearButton.addEventListener("click", () => {
+on(clearButton, "click", () => {
   if (!confirm("Удалить все операции?")) {
     return;
   }
-  pushHistory();
   transactions = [];
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   render();
-});
+}, "очистка данных");
 
-toggleSubcategoryButton.addEventListener("click", () => {
+on(toggleSubcategoryButton, "click", () => {
   showAllSubcategories = !showAllSubcategories;
   renderCharts();
-});
+}, "переключение диаграммы подкатегорий");
 
-toggleExpenseCategoryButton.addEventListener("click", () => {
+on(toggleExpenseCategoryButton, "click", () => {
   showAllExpenseCategories = !showAllExpenseCategories;
   renderCharts();
-});
+}, "переключение диаграммы категорий");
 
-reportRangeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const range = button.dataset.reportRange;
-    if (range === "all") {
-      const bounds = getDateBounds(transactions);
-      setReportRange(bounds.start, bounds.end);
-    } else {
-      const days = Number.parseInt(range, 10);
-      const bounds = getDateBounds(transactions);
-      const end = bounds.end || new Date().toISOString().slice(0, 10);
-      const endDate = new Date(end);
-      const startDate = new Date(endDate);
-      startDate.setDate(endDate.getDate() - (days - 1));
-      setReportRange(startDate.toISOString().slice(0, 10), end);
-    }
-    renderReports();
-  });
-});
+onAll(reportRangeButtons, "click", (event) => {
+  reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  const range = event.currentTarget.dataset.reportRange;
+  if (range === "all") {
+    const bounds = getDateBounds(transactions);
+    setReportRange(bounds.start, bounds.end);
+  } else {
+    const days = Number.parseInt(range, 10);
+    const bounds = getDateBounds(transactions);
+    const end = bounds.end || new Date().toISOString().slice(0, 10);
+    const endDate = new Date(end);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - (days - 1));
+    setReportRange(startDate.toISOString().slice(0, 10), end);
+  }
+  renderReports();
+}, "диапазон отчета");
 
-reportGranularityButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    reportGranularityButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    reportGranularity = button.dataset.reportGranularity;
-    renderReports();
-  });
-});
+onAll(reportGranularityButtons, "click", (event) => {
+  reportGranularityButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  reportGranularity = event.currentTarget.dataset.reportGranularity;
+  renderReports();
+}, "гранулярность отчета");
 
-applyReportRangeButton.addEventListener("click", () => {
+on(applyReportRangeButton, "click", () => {
   reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
   setReportRange(reportStartInput.value, reportEndInput.value);
   renderReports();
-});
+}, "ручной диапазон отчета");
 
-capitalTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    capitalSetTab(tab.dataset.capitalTab);
-  });
-});
+onAll(capitalTabs, "click", (event) => {
+  capitalSetTab(event.currentTarget.dataset.capitalTab);
+}, "капитал табы");
 
-if (capitalAssetDrawer) {
-  capitalSetAssetDrawer(false);
-}
+  if (capitalAssetDrawer) {
+    capitalSetAssetDrawer(false);
+  }
 
-if (capitalAssetToggle) {
-  capitalAssetToggle.addEventListener("click", () => {
-    capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
-    if (capitalAssetDrawer.classList.contains("is-open")) {
-      capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
+  on(capitalAssetToggle, "click", () => {
+    capitalResetAssetForm();
+    capitalSetAssetDrawer(true);
+    capitalSetAssetModal(true);
+    if (capitalAssetName) {
+      capitalAssetName.focus();
     }
-  });
-}
+  }, "toggle drawer");
 
-if (capitalAssetToggleButtons.length) {
-  capitalAssetToggleButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
-      if (capitalAssetDrawer.classList.contains("is-open")) {
-        capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    });
-  });
-}
+  onAll(capitalAssetToggleButtons, "click", () => {
+    capitalResetAssetForm();
+    capitalSetAssetDrawer(true);
+    capitalSetAssetModal(true);
+    if (capitalAssetName) {
+      capitalAssetName.focus();
+    }
+  }, "toggle drawer");
 
-if (capitalAssetClose) {
-  capitalAssetClose.addEventListener("click", () => {
+  on(capitalAssetClose, "click", () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
-  });
-}
+  }, "close asset");
 
-if (capitalAssetOverlay) {
-  capitalAssetOverlay.addEventListener("click", () => {
+  on(capitalAssetOverlay, "click", () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
-  });
-}
+  }, "overlay asset");
 
-if (capitalAssetDelete) {
-  capitalAssetDelete.addEventListener("click", () => {
+  on(capitalAssetAvatar, "change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    capitalAssetAvatarDataUrl = await compressImageToDataUrl(file);
+    updateCapitalAssetAvatarPreview(capitalAssetAvatarDataUrl);
+  }, "avatar upload");
+
+  on(capitalAssetAvatarRemove, "click", () => {
+    capitalAssetAvatarDataUrl = "";
+    if (capitalAssetAvatar) {
+      capitalAssetAvatar.value = "";
+    }
+    updateCapitalAssetAvatarPreview("");
+  }, "avatar remove");
+
+  on(document, "keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (capitalIsAssetModalOpen()) {
+      capitalSetAssetModal(false);
+      capitalSetAssetDrawer(false);
+      capitalResetAssetForm();
+    }
+  }, "escape close");
+
+  on(capitalAssetDelete, "click", () => {
     if (!capitalEditingAssetId || !confirm("Удалить актив?")) {
       return;
     }
@@ -3068,284 +4050,437 @@ if (capitalAssetDelete) {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
+    showToast("Актив удален");
     renderCapitalView();
-  });
-}
+  }, "удаление актива");
 
-capitalAssetForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddAsset();
-});
+  on(capitalAssetForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddAsset();
+  }, "добавление актива");
 
-if (capitalBaseCurrency) {
-  capitalBaseCurrency.addEventListener("change", () => {
+  on(capitalBaseCurrency, "change", () => {
     capitalState.settings.baseCurrency = capitalBaseCurrency.value;
     saveCapitalV2(capitalState);
     renderCapitalView();
     refreshFxRate();
-  });
-}
+  }, "смена валюты");
 
-if (capitalFxRefresh) {
-  capitalFxRefresh.addEventListener("click", () => {
+  on(capitalFxRefresh, "click", () => {
     refreshFxRate();
-  });
-}
+  }, "обновление FX");
 
-if (capitalFxCurrency) {
-  capitalFxCurrency.addEventListener("blur", () => {
+  on(capitalFxCurrency, "blur", () => {
     refreshFxRate();
-  });
-}
+  }, "обновление FX");
 
-if (capitalAssetCurrency && capitalFxCurrency) {
-  capitalAssetCurrency.addEventListener("change", () => {
+  on(capitalAssetCurrency, "change", () => {
+    if (!capitalFxCurrency) {
+      return;
+    }
     const currency = capitalAssetCurrency.value.trim().toUpperCase();
     if (currency) {
       capitalFxCurrency.value = currency;
       refreshFxRate();
     }
-  });
-}
+  }, "смена валюты актива");
 
-capitalStructureButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  onAll(capitalStructureButtons, "click", (event) => {
     capitalStructureButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const mode = button.dataset.capitalStructure;
+    event.currentTarget.classList.add("is-active");
+    const mode = event.currentTarget.dataset.capitalStructure;
     capitalAssetTypeChart.classList.toggle("is-hidden", mode !== "bars");
     capitalAssetTypePie.classList.toggle("is-hidden", mode !== "pie");
-  });
-});
+  }, "структура капитала");
 
-if (capitalAssetViewButtons.length) {
-  capitalAssetViewButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      capitalAssetViewButtons.forEach((item) => item.classList.remove("is-active"));
-      button.classList.add("is-active");
-      capitalAssetPanels.forEach((panel) => {
-        panel.classList.toggle("is-active", panel.dataset.capitalAssetPanel === button.dataset.capitalAssetView);
-      });
+  onAll(capitalAssetViewButtons, "click", (event) => {
+    capitalAssetViewButtons.forEach((item) => item.classList.remove("is-active"));
+    event.currentTarget.classList.add("is-active");
+    capitalAssetPanels.forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.capitalAssetPanel === event.currentTarget.dataset.capitalAssetView);
     });
-  });
-}
+  }, "вид активов");
 
-if (capitalCategoryForm) {
-  capitalCategoryForm.addEventListener("submit", (event) => {
+  on(capitalCategoryForm, "submit", (event) => {
     event.preventDefault();
     const category = capitalCategoryName.value.trim();
     const subcategory = capitalSubcategoryName.value.trim();
     if (!category) {
+      showError("Введите название категории капитала.");
       return;
     }
     capitalEnsureCategory(category, subcategory);
     saveCapitalV2(capitalState);
-    renderCapitalCategories();
+    renderCapitalView();
     capitalCategoryForm.reset();
-  });
-}
+  }, "категории капитала");
 
-if (capitalCategoryManager) {
-  capitalCategoryManager.addEventListener("click", (event) => {
+  on(capitalCategoryManager, "click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) {
       return;
     }
-    const categoryName = target.dataset.capitalCategoryDelete;
+    const categoryName = target.dataset.category;
     const subcategoryName = target.dataset.subcategory;
-    if (categoryName && !subcategoryName) {
-      capitalState.assetCategories = capitalState.assetCategories.filter((category) => category.name !== categoryName);
-      saveCapitalV2(capitalState);
-      renderCapitalCategories();
+    const categoryAction = target.dataset.capitalCategoryAction;
+    const subcategoryAction = target.dataset.capitalSubcategoryAction;
+
+    if (categoryAction === "rename" && categoryName) {
+      const nextName = prompt("Новое имя категории", categoryName);
+      if (nextName) {
+        renameCapitalCategory(categoryName, nextName);
+      }
       return;
     }
-    if (categoryName && subcategoryName) {
-      const category = capitalState.assetCategories.find((item) => item.name === categoryName);
-      if (!category) {
+    if (categoryAction === "delete" && categoryName) {
+      if (confirm(`Удалить категорию «${categoryName}»?`)) {
+        deleteCapitalCategory(categoryName);
+      }
+      return;
+    }
+    if (subcategoryAction === "rename" && categoryName && subcategoryName) {
+      const nextName = prompt("Новое имя подкатегории", subcategoryName);
+      if (nextName) {
+        renameCapitalSubcategory(categoryName, subcategoryName, nextName);
+      }
+      return;
+    }
+    if (subcategoryAction === "delete" && categoryName && subcategoryName) {
+      if (confirm(`Удалить подкатегорию «${subcategoryName}»?`)) {
+        deleteCapitalSubcategory(categoryName, subcategoryName);
+      }
+    }
+  }, "удаление категории капитала");
+
+  on(capitalAssetType, "change", () => {
+    const isDeposit = capitalAssetType.value === "deposit";
+    capitalAssetExpectedProfit.disabled = !isDeposit;
+    capitalAssetMaturityDate.disabled = !isDeposit;
+    if (!isDeposit) {
+      capitalAssetExpectedProfit.value = "";
+      capitalAssetMaturityDate.value = "";
+    }
+    const categoryLabel = capitalTypeLabel(capitalAssetType.value);
+    if (categoryLabel) {
+      updateCapitalSubcategoryOptions(categoryLabel, "");
+    }
+  }, "тип актива");
+
+  on(capitalAssetSearch, "input", (event) => {
+    assetFilters.search = event.target.value.trim().toLowerCase();
+    renderCapitalAssets();
+  }, "поиск активов");
+
+  on(capitalAssetTypeFilter, "change", (event) => {
+    assetFilters.type = event.target.value;
+    renderCapitalAssets();
+  }, "фильтр активов");
+
+  on(capitalAssetLiquidityFilter, "change", (event) => {
+    assetFilters.liquidity = event.target.value;
+    renderCapitalAssets();
+  }, "фильтр ликвидности");
+
+  on(capitalAssetSort, "change", (event) => {
+    assetFilters.sort = event.target.value;
+    renderCapitalAssets();
+  }, "сортировка активов");
+
+  on(capitalAssetSortDir, "click", () => {
+    assetFilters.direction = assetFilters.direction === "asc" ? "desc" : "asc";
+    if (capitalAssetSortDir) {
+      capitalAssetSortDir.textContent = assetFilters.direction === "asc" ? "По возр." : "По убыв.";
+      capitalAssetSortDir.setAttribute("aria-pressed", assetFilters.direction === "asc" ? "true" : "false");
+    }
+    renderCapitalAssets();
+  }, "направление сортировки");
+
+  on(capitalAssetsList, "click", (event) => {
+    const actionButton = event.target.closest("[data-action]");
+    const action = actionButton?.dataset.action;
+    const assetId = actionButton?.dataset.id || actionButton?.closest("[data-asset-id]")?.dataset.assetId;
+
+    if (action === "add-asset") {
+      capitalSetAssetDrawer(true);
+      capitalSetAssetModal(true);
+      capitalResetAssetForm();
+      if (capitalAssetName) {
+        capitalAssetName.focus();
+      }
+      return;
+    }
+
+    if (action === "toggle") {
+      const isExpanded = actionButton.getAttribute("aria-expanded") === "true";
+      actionButton.setAttribute("aria-expanded", String(!isExpanded));
+      const detailsId = actionButton.getAttribute("aria-controls");
+      if (detailsId) {
+        const details = document.getElementById(detailsId);
+        if (details) {
+          details.hidden = isExpanded;
+        }
+      }
+      return;
+    }
+
+    if (action === "toggle-group") {
+      const groupName = actionButton.dataset.group;
+      if (groupName) {
+        assetUiState.groups[groupName] = !(assetUiState.groups[groupName] ?? true);
+        persistAssetUiState();
+        renderCapitalAssets();
+      }
+      return;
+    }
+
+    if (action === "toggle-subgroup") {
+      const groupName = actionButton.dataset.group;
+      const subName = actionButton.dataset.subgroup;
+      if (groupName && subName) {
+        const key = `${groupName}::${subName}`;
+        assetUiState.subgroups[key] = !(assetUiState.subgroups[key] ?? true);
+        persistAssetUiState();
+        renderCapitalAssets();
+      }
+      return;
+    }
+
+    if (!assetId) {
+      return;
+    }
+
+    const asset = capitalState.assets.find((item) => item.id === assetId);
+    if (!asset) {
+      return;
+    }
+
+    if (action === "edit-asset") {
+      capitalFillAssetForm(asset);
+      showToast("Открыто редактирование");
+      return;
+    }
+
+    if (action === "delete-asset") {
+      if (!confirm("Удалить актив?")) {
         return;
       }
-      category.subs = category.subs.filter((sub) => sub !== subcategoryName);
+      capitalState.assets = capitalState.assets.filter((item) => item.id !== assetId);
       saveCapitalV2(capitalState);
-      renderCapitalCategories();
+      showToast("Актив удален");
+      renderCapitalView();
     }
-  });
-}
+  }, "действия по активу");
 
-capitalOverviewFilters.forEach((button) => {
-  button.addEventListener("click", () => {
-    capitalOverviewFilters.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    capitalOverviewFilter = button.dataset.capitalFilter;
-    renderCapitalLedger();
-  });
-});
+  on(capitalAssetsList, "keydown", (event) => {
+    const target = event.target.closest("[data-action='toggle']");
+    if (!target) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      target.click();
+    }
+  }, "toggle details");
 
-capitalAssetType.addEventListener("change", () => {
-  const isDeposit = capitalAssetType.value === "deposit";
-  capitalAssetExpectedProfit.disabled = !isDeposit;
-  capitalAssetMaturityDate.disabled = !isDeposit;
-  if (!isDeposit) {
-    capitalAssetExpectedProfit.value = "";
-    capitalAssetMaturityDate.value = "";
-  }
-});
+  on(capitalDebtForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddDebt();
+  }, "добавление долга");
 
-capitalAssetsTable.addEventListener("click", (event) => {
-  const row = event.target.closest("tr");
-  if (!row || !row.dataset.assetId) {
-    return;
-  }
-  const asset = capitalState.assets.find((item) => item.id === row.dataset.assetId);
-  if (!asset) {
-    return;
-  }
-  capitalFillAssetForm(asset);
-});
+  on(capitalDebtsTable, "input", (event) => {
+    const target = event.target;
+    const row = target.closest("tr");
+    if (!row || !row.dataset.debtId) {
+      return;
+    }
+    const field = target.dataset.field;
+    if (!field) {
+      return;
+    }
+    capitalUpdateDebt(row.dataset.debtId, field, target.value);
+  }, "обновление долга");
 
-capitalDebtForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddDebt();
-});
-
-capitalDebtsTable.addEventListener("input", (event) => {
-  const target = event.target;
-  const row = target.closest("tr");
-  if (!row || !row.dataset.debtId) {
-    return;
-  }
-  const field = target.dataset.field;
-  if (!field) {
-    return;
-  }
-  capitalUpdateDebt(row.dataset.debtId, field, target.value);
-});
-
-capitalDebtsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const id = target.dataset.debtDelete;
-  if (!id || !confirm("Удалить долг?")) {
-    return;
-  }
-  capitalState.debts = capitalState.debts.filter((item) => item.id !== id);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalExtraPayment.addEventListener("input", () => {
-  renderCapitalPayoff();
-});
-
-capitalGoalForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddGoal();
-});
-
-capitalGoalsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const id = target.dataset.goalDelete;
-  if (!id || !confirm("Удалить цель?")) {
-    return;
-  }
-  capitalState.goals = capitalState.goals.filter((item) => item.id !== id);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalSnapshotNow.addEventListener("click", () => {
-  capitalCreateSnapshotNow();
-});
-
-capitalSnapshotsTable.addEventListener("input", (event) => {
-  const target = event.target;
-  const row = target.closest("tr");
-  if (!row || !row.dataset.snapshotMonth) {
-    return;
-  }
-  if (target.dataset.field !== "note") {
-    return;
-  }
-  capitalUpdateSnapshotNote(row.dataset.snapshotMonth, target.value);
-});
-
-capitalSnapshotsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const month = target.dataset.snapshotDelete;
-  if (!month || !confirm("Удалить снимок?")) {
-    return;
-  }
-  capitalState.snapshots = capitalState.snapshots.filter((item) => item.month !== month);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalExportButton.addEventListener("click", () => {
-  const payload = JSON.stringify(capitalState, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "capital.json";
-  link.click();
-  URL.revokeObjectURL(url);
-});
-
-capitalImportInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    capitalState = {
-      assets: data.assets || [],
-      debts: data.debts || [],
-      goals: data.goals || [],
-      snapshots: data.snapshots || [],
-      settings: data.settings || { baseCurrency: "RUB", fxRates: {} },
-    };
-    normalizeCapitalState();
+  on(capitalDebtsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const id = target.dataset.debtDelete;
+    if (!id || !confirm("Удалить долг?")) {
+      return;
+    }
+    capitalState.debts = capitalState.debts.filter((item) => item.id !== id);
     saveCapitalV2(capitalState);
     renderCapitalView();
-  } catch (error) {
-    alert("Не удалось импортировать файл.");
-  } finally {
-    capitalImportInput.value = "";
-  }
-});
+  }, "удаление долга");
 
-const initializeApp = async () => {
+  on(capitalExtraPayment, "input", () => {
+    renderCapitalPayoff();
+  }, "доп платеж");
+
+  on(capitalGoalForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddGoal();
+  }, "добавление цели");
+
+  on(capitalGoalsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const id = target.dataset.goalDelete;
+    if (!id || !confirm("Удалить цель?")) {
+      return;
+    }
+    capitalState.goals = capitalState.goals.filter((item) => item.id !== id);
+    saveCapitalV2(capitalState);
+    renderCapitalView();
+  }, "удаление цели");
+
+  on(capitalSnapshotNow, "click", () => {
+    capitalCreateSnapshotNow();
+  }, "снимок капитала");
+
+  on(capitalSnapshotsTable, "input", (event) => {
+    const target = event.target;
+    const row = target.closest("tr");
+    if (!row || !row.dataset.snapshotMonth) {
+      return;
+    }
+    if (target.dataset.field !== "note") {
+      return;
+    }
+    capitalUpdateSnapshotNote(row.dataset.snapshotMonth, target.value);
+  }, "заметка снимка");
+
+  on(capitalSnapshotsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const month = target.dataset.snapshotDelete;
+    if (!month || !confirm("Удалить снимок?")) {
+      return;
+    }
+    capitalState.snapshots = capitalState.snapshots.filter((item) => item.month !== month);
+    saveCapitalV2(capitalState);
+    renderCapitalView();
+  }, "удаление снимка");
+
+  on(capitalExportButton, "click", () => {
+    const payload = JSON.stringify(capitalState, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "capital.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, "экспорт капитала");
+
+  on(capitalImportInput, "change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      capitalState = {
+        assets: data.assets || [],
+        debts: data.debts || [],
+        goals: data.goals || [],
+        snapshots: data.snapshots || [],
+        settings: data.settings || { baseCurrency: "RUB", fxRates: {} },
+      };
+      normalizeCapitalState();
+      saveCapitalV2(capitalState);
+      renderCapitalView();
+    } catch (error) {
+      showError("Не удалось импортировать файл капитала.");
+    } finally {
+      capitalImportInput.value = "";
+    }
+  }, "импорт капитала");
+
+  on(backupButton, "click", () => {
+    const payload = buildBackupPayload();
+    downloadJson(payload, `budget-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  }, "backup");
+
+  on(restoreInput, "change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await applyBackupPayload(data);
+      activeView = data.settings?.view || activeView;
+      currentLayout = data.settings?.layout || currentLayout;
+      undoStack = [];
+      renderCategories();
+      initializeReportRange();
+      updateUndoState();
+      updateTransactionFormState();
+      capitalSetTab("overview");
+      setLayout(currentLayout);
+      setView(activeView);
+    } catch (error) {
+      showError("Не удалось восстановить backup.");
+    } finally {
+      restoreInput.value = "";
+    }
+  }, "restore");
+};
+
+const loadState = async () => {
   transactions = await loadTransactions();
   categories = await loadCategories();
   capitalState = await migrateCapitalState();
-  normalizeCapitalState();
+  const capitalMigrated = normalizeCapitalState();
+  if (capitalMigrated) {
+    await saveCapitalV2(capitalState);
+  }
 
-  renderCategories();
-  resetForm();
-  initializeReportRange();
-  render();
-  capitalSetTab("overview");
-  renderCapitalView();
-  updateUndoState();
-
-  const savedView = await dbGet(VIEW_KEY);
-  const savedLayout = await dbGet(LAYOUT_KEY);
-  const page = document.body.dataset.page || "main";
-  const urlView = page === "main" ? new URLSearchParams(window.location.search).get("view") : null;
-  const targetView = page === "capital"
-    ? "capital"
-    : (urlView || savedView || "dashboard");
-  setView(targetView);
-  setLayout(savedLayout || "comfort");
+  const savedView = await Storage.get(VIEW_KEY);
+  const savedLayout = await Storage.get(LAYOUT_KEY);
+  const savedUiState = await Storage.get(CAPITAL_ASSETS_UI_KEY);
+  if (savedUiState) {
+    try {
+      assetUiState = JSON.parse(savedUiState);
+    } catch (error) {
+      assetUiState = { groups: {}, subgroups: {} };
+    }
+  }
+  const urlView = new URLSearchParams(window.location.search).get("view");
+  activeView = urlView || savedView || "dashboard";
+  currentLayout = savedLayout || "comfort";
 };
 
-initializeApp();
+const initializeApp = safeExec(async () => {
+  await Storage.init();
+  await loadState();
+
+  bindEvents();
+  renderCategories();
+  resetForm();
+  setTransactionFormMode("add");
+  initializeReportRange();
+  updateUndoState();
+  updateTransactionFormState();
+  updateCapitalAssetAvatarPreview("");
+  capitalSetTab("overview");
+  setLayout(currentLayout);
+  setView(activeView);
+  if (new URLSearchParams(window.location.search).get("selftest") === "1") {
+    await selfTest();
+  }
+}, "инициализация приложения");
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApp);
+} else {
+  initializeApp();
+}
