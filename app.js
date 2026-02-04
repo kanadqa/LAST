@@ -90,6 +90,8 @@ const capitalAssetCurrency = document.getElementById("capitalAssetCurrency");
 const capitalAssetAmount = document.getElementById("capitalAssetAmount");
 const capitalAssetInvested = document.getElementById("capitalAssetInvested");
 const capitalAssetSubcategory = document.getElementById("capitalAssetSubcategory");
+const capitalAssetIcon = document.getElementById("capitalAssetIcon");
+const capitalAssetAvatar = document.getElementById("capitalAssetAvatar");
 const capitalSubcategoryList = document.getElementById("capitalSubcategoryList");
 const capitalAssetMaturityDate = document.getElementById("capitalAssetMaturityDate");
 const capitalAssetLiquidity = document.getElementById("capitalAssetLiquidity");
@@ -97,6 +99,8 @@ const capitalAssetExpectedProfit = document.getElementById("capitalAssetExpected
 const capitalAssetNote = document.getElementById("capitalAssetNote");
 const capitalAssetClose = document.getElementById("capitalAssetClose");
 const capitalAssetDelete = document.getElementById("capitalAssetDelete");
+const capitalAssetDrawerTitle = document.getElementById("capitalAssetDrawerTitle");
+const toast = document.getElementById("toast");
 const capitalAssetsList = document.getElementById("capitalAssetsList");
 const capitalAssetSearch = document.getElementById("capitalAssetSearch");
 const capitalAssetTypeFilter = document.getElementById("capitalAssetTypeFilter");
@@ -530,6 +534,7 @@ const assetFilters = {
   sort: "amount",
   direction: "desc",
 };
+let capitalAssetAvatarDataUrl = "";
 
 const capitalIsUnconvertible = (asset) =>
   asset.currency !== capitalState?.settings?.baseCurrency
@@ -1288,6 +1293,27 @@ const capitalNowIso = () => new Date().toISOString();
 
 const capitalGenerateId = (prefix) =>
   (crypto.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random()}`);
+
+const capitalDefaultIcon = (type) => ({
+  cash: "💵",
+  bank: "🏦",
+  deposit: "🧾",
+  investment: "📈",
+  real_estate: "🏠",
+  other: "📦",
+}[type] || "💼");
+
+const showToast = (message) => {
+  if (!toast) {
+    return;
+  }
+  toast.textContent = message;
+  toast.classList.remove("is-hidden");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => {
+    toast.classList.add("is-hidden");
+  }, 2200);
+};
 
 const capitalMonthKey = () => new Date().toISOString().slice(0, 7);
 
@@ -2178,6 +2204,10 @@ const renderCapitalAssets = () => {
         const percentLabel = profitMeta.percent == null ? "—" : `${profitMeta.percent.toFixed(1)}%`;
         const liquidityLabel = capitalLiquidityShort(asset.liquidity);
         const iconLetter = (asset.name || "?").trim().charAt(0).toUpperCase();
+        const iconValue = asset.icon || capitalDefaultIcon(asset.type);
+        const avatarMarkup = asset.avatarDataUrl
+          ? `<img src="${asset.avatarDataUrl}" alt="" />`
+          : `<span>${iconValue || iconLetter}</span>`;
         const detailId = `asset-details-${asset.id}`;
 
         const card = document.createElement("div");
@@ -2185,7 +2215,7 @@ const renderCapitalAssets = () => {
         card.dataset.assetId = asset.id;
         card.innerHTML = `
           <button class="asset-item-main" data-action="toggle" aria-expanded="false" aria-controls="${detailId}">
-            <span class="asset-avatar">${iconLetter}</span>
+            <span class="asset-avatar">${avatarMarkup}</span>
             <span class="asset-main">
               <span class="asset-title">${asset.name}</span>
               <span class="asset-meta">${capitalTypeLabel(asset.type)} • ${asset.currency}</span>
@@ -2205,17 +2235,23 @@ const renderCapitalAssets = () => {
             <span class="chevron">›</span>
           </button>
           <div id="${detailId}" class="asset-details">
-            <div class="asset-detail-row">
-              <span>Дата окончания</span>
-              <strong>${asset.maturityDate || "—"}</strong>
-            </div>
-            <div class="asset-detail-row">
-              <span>Потенц. доходность</span>
-              <strong>${asset.expectedProfit != null && asset.expectedProfit !== "" ? asset.expectedProfit : "—"}</strong>
-            </div>
-            <div class="asset-detail-row">
-              <span>Комментарий</span>
-              <strong>${asset.note || "—"}</strong>
+            <div class="asset-detail-grid">
+              <div class="asset-detail-row">
+                <span>Дата окончания</span>
+                <strong>${asset.maturityDate || "—"}</strong>
+              </div>
+              <div class="asset-detail-row">
+                <span>Потенц. доходность</span>
+                <strong>${asset.expectedProfit != null && asset.expectedProfit !== "" ? asset.expectedProfit : "—"}</strong>
+              </div>
+              <div class="asset-detail-row">
+                <span>Комментарий</span>
+                <strong>${asset.note || "—"}</strong>
+              </div>
+              <div class="asset-detail-row">
+                <span>Валюта</span>
+                <strong>${asset.currency}</strong>
+              </div>
             </div>
             <div class="asset-detail-actions">
               <button class="button secondary" data-action="edit-asset" data-id="${asset.id}">Редактировать</button>
@@ -2549,13 +2585,14 @@ const capitalSetAssetDrawer = (isOpen) => {
     return;
   }
   capitalAssetDrawer.classList.toggle("is-open", isOpen);
+  capitalAssetDrawer.setAttribute("aria-hidden", String(!isOpen));
   if (capitalAssetToggle) {
     capitalAssetToggle.setAttribute("aria-expanded", String(isOpen));
-    capitalAssetToggle.textContent = isOpen ? "Скрыть форму" : "Добавить новый актив";
+    capitalAssetToggle.textContent = "Добавить актив";
   }
   capitalAssetToggleButtons.forEach((button) => {
     button.setAttribute("aria-expanded", String(isOpen));
-    button.textContent = isOpen ? "Скрыть форму" : "Открыть форму";
+    button.textContent = "Открыть форму";
   });
 };
 
@@ -2568,6 +2605,9 @@ const capitalSetAssetModal = (isOpen) => {
     capitalAssetOverlay.classList.toggle("is-active", isOpen);
   }
   document.body.classList.toggle("modal-open", isOpen);
+  if (!isOpen) {
+    capitalAssetDrawer.setAttribute("aria-hidden", "true");
+  }
 };
 
 const capitalIsAssetModalOpen = () =>
@@ -2650,6 +2690,13 @@ const capitalResetAssetForm = () => {
   capitalAssetMaturityDate.value = "";
   capitalAssetSubcategory.value = "";
   capitalAssetExpectedProfit.value = "";
+  if (capitalAssetIcon) {
+    capitalAssetIcon.value = "";
+  }
+  if (capitalAssetAvatar) {
+    capitalAssetAvatar.value = "";
+  }
+  capitalAssetAvatarDataUrl = "";
   capitalEditingAssetId = null;
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
@@ -2657,6 +2704,9 @@ const capitalResetAssetForm = () => {
   }
   if (capitalAssetDelete) {
     capitalAssetDelete.classList.remove("is-visible");
+  }
+  if (capitalAssetDrawerTitle) {
+    capitalAssetDrawerTitle.textContent = "Новый актив";
   }
 };
 
@@ -2673,6 +2723,10 @@ const capitalFillAssetForm = (asset) => {
   capitalAssetLiquidity.value = asset.liquidity || "high";
   capitalAssetExpectedProfit.value = asset.expectedProfit ?? "";
   capitalAssetNote.value = asset.note || "";
+  if (capitalAssetIcon) {
+    capitalAssetIcon.value = asset.icon || "";
+  }
+  capitalAssetAvatarDataUrl = asset.avatarDataUrl || "";
   capitalEditingAssetId = asset.id;
   const submitButton = capitalAssetForm.querySelector('button[type="submit"]');
   if (submitButton) {
@@ -2680,6 +2734,12 @@ const capitalFillAssetForm = (asset) => {
   }
   if (capitalAssetDelete) {
     capitalAssetDelete.classList.add("is-visible");
+  }
+  if (capitalAssetDrawerTitle) {
+    capitalAssetDrawerTitle.textContent = "Редактирование";
+  }
+  if (capitalAssetName) {
+    capitalAssetName.focus();
   }
 };
 
@@ -2715,6 +2775,8 @@ const capitalAddAsset = () => {
       : null,
     maturityDate: isDeposit ? capitalAssetMaturityDate.value : "",
     note: capitalAssetNote.value.trim(),
+    icon: capitalAssetIcon ? capitalAssetIcon.value.trim() : "",
+    avatarDataUrl: capitalAssetAvatarDataUrl || "",
   };
   if (capitalEditingAssetId) {
     const existing = capitalState.assets.find((item) => item.id === capitalEditingAssetId);
@@ -3510,16 +3572,20 @@ onAll(capitalTabs, "click", (event) => {
   }
 
   on(capitalAssetToggle, "click", () => {
-    capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
-    if (capitalAssetDrawer.classList.contains("is-open")) {
-      capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
+    capitalResetAssetForm();
+    capitalSetAssetDrawer(true);
+    capitalSetAssetModal(true);
+    if (capitalAssetName) {
+      capitalAssetName.focus();
     }
   }, "toggle drawer");
 
   onAll(capitalAssetToggleButtons, "click", () => {
-    capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
-    if (capitalAssetDrawer.classList.contains("is-open")) {
-      capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
+    capitalResetAssetForm();
+    capitalSetAssetDrawer(true);
+    capitalSetAssetModal(true);
+    if (capitalAssetName) {
+      capitalAssetName.focus();
     }
   }, "toggle drawer");
 
@@ -3534,6 +3600,47 @@ onAll(capitalTabs, "click", (event) => {
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
   }, "overlay asset");
+
+  on(capitalAssetAvatar, "change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const size = 96;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return;
+        }
+        const scale = Math.max(size / img.width, size / img.height);
+        const width = img.width * scale;
+        const height = img.height * scale;
+        const dx = (size - width) / 2;
+        const dy = (size - height) / 2;
+        ctx.drawImage(img, dx, dy, width, height);
+        capitalAssetAvatarDataUrl = canvas.toDataURL("image/png");
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }, "avatar upload");
+
+  on(document, "keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (capitalIsAssetModalOpen()) {
+      capitalSetAssetModal(false);
+      capitalSetAssetDrawer(false);
+      capitalResetAssetForm();
+    }
+  }, "escape close");
 
   on(capitalAssetDelete, "click", () => {
     if (!capitalEditingAssetId || !confirm("Удалить актив?")) {
@@ -3686,6 +3793,10 @@ onAll(capitalTabs, "click", (event) => {
     if (action === "add-asset") {
       capitalSetAssetDrawer(true);
       capitalSetAssetModal(true);
+      capitalResetAssetForm();
+      if (capitalAssetName) {
+        capitalAssetName.focus();
+      }
       return;
     }
 
@@ -3713,6 +3824,7 @@ onAll(capitalTabs, "click", (event) => {
 
     if (action === "edit-asset") {
       capitalFillAssetForm(asset);
+      showToast("Открыто редактирование");
       return;
     }
 
