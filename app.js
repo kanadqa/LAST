@@ -2359,11 +2359,11 @@ const renderCapitalAssets = () => {
   }
   if (capitalAssetsSummaryProfit) {
     capitalAssetsSummaryProfit.textContent = capitalFormatMoney(totalMeta.profit);
-    capitalAssetsSummaryProfit.classList.toggle("is-negative", totalMeta.profit < 0);
   }
-  const profitCard = capitalAssetsSummaryProfit?.closest(".asset-summary-card");
+  const profitCard = capitalAssetsSummaryProfit?.closest(".summary-card");
   if (profitCard) {
     profitCard.classList.toggle("is-negative", totalMeta.profit < 0);
+    profitCard.classList.toggle("is-positive", totalMeta.profit >= 0);
   }
   if (capitalAssetsSummaryPercent) {
     if (totalMeta.percent == null) {

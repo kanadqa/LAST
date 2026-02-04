@@ -1090,101 +1090,149 @@ td {
   font-weight: 600;
 }
 
-.asset-summary {
+.assets-summary-grid {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.asset-summary-card {
+@media (max-width: 900px) {
+  .assets-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .assets-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.summary-card {
   --accent: #94a3b8;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border-radius: calc(var(--radius) + 2px);
-  padding: 18px 18px 16px;
-  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  --accent-bg: rgba(148, 163, 184, 0.08);
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  border-radius: 16px;
+  padding: 16px 18px;
+  min-height: 92px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   position: relative;
   overflow: hidden;
+  align-items: flex-start;
 }
 
-.asset-summary-card.total {
-  --accent: #94a3b8;
-}
-
-.asset-summary-card.invested {
-  --accent: #2563eb;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), #ffffff 55%);
-}
-
-.asset-summary-card.profit {
-  --accent: #16a34a;
-  background: linear-gradient(135deg, rgba(22, 163, 74, 0.14), #ffffff 55%);
-}
-
-.asset-summary-card.profit.is-negative {
-  --accent: #dc2626;
-  background: linear-gradient(135deg, rgba(220, 38, 38, 0.14), #ffffff 55%);
-}
-
-.asset-summary-card.expected {
-  --accent: #0ea5e9;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.14), #ffffff 55%);
-}
-
-.asset-summary-card::before {
+.summary-card::before {
   content: "";
   position: absolute;
-  inset: 0 0 auto 0;
-  height: 4px;
+  inset: 0 auto 0 0;
+  width: 4px;
   background: var(--accent);
 }
 
-.asset-summary-card > span:not(.chip) {
+.summary-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(130deg, var(--accent-bg), transparent 55%);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.summary-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.summary-card--total {
+  --accent: #94a3b8;
+  --accent-bg: rgba(148, 163, 184, 0.08);
+}
+
+.summary-card--invested {
+  --accent: #2563eb;
+  --accent-bg: rgba(37, 99, 235, 0.12);
+}
+
+.summary-card--profit {
+  --accent: #16a34a;
+  --accent-bg: rgba(22, 163, 74, 0.12);
+}
+
+.summary-card--profit.is-negative {
+  --accent: #dc2626;
+  --accent-bg: rgba(220, 38, 38, 0.12);
+}
+
+.summary-card--expected {
+  --accent: #0ea5e9;
+  --accent-bg: rgba(14, 165, 233, 0.12);
+}
+
+.summary-label {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--muted);
   font-weight: 600;
 }
 
-.asset-summary-card strong {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+.summary-value {
+  margin-top: auto;
+  font-size: 26px;
+  font-weight: 750;
+  line-height: 1.1;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+
+.summary-card--invested .summary-value {
+  color: #1d4ed8;
 }
 
-.asset-summary-card.invested strong {
-  color: #2563eb;
+.summary-card--profit.is-positive .summary-value {
+  color: #15803d;
 }
 
-.asset-summary-card.profit strong {
-  color: #16a34a;
+.summary-card--profit.is-negative .summary-value {
+  color: #b91c1c;
 }
 
-.asset-summary-card.profit.is-negative strong {
-  color: #dc2626;
+.summary-card--expected .summary-value {
+  color: #0284c7;
 }
 
-.asset-summary-card.expected strong {
-  color: #0ea5e9;
+.summary-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.asset-summary-percent {
-  color: var(--muted);
+.summary-sub {
   font-size: 12px;
-  font-weight: 500;
+  color: var(--muted);
+  margin-top: 6px;
+  white-space: nowrap;
 }
 
-.asset-summary-percent.is-warning {
+.summary-sub-row .summary-sub {
+  margin-top: 6px;
+}
+
+.summary-chip {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.summary-sub.is-warning {
   color: #b45309;
 }
 
-.asset-summary-percent.is-info {
+.summary-sub.is-info {
   color: #2563eb;
 }
 

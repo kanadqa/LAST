@@ -419,25 +419,29 @@
                     <button id="capitalAssetSortDir" class="chip chip-toggle" type="button" aria-pressed="false">По убыв.</button>
                   </div>
 
-                  <div class="asset-summary">
-                    <div class="asset-summary-card total">
-                      <span>Всего</span>
-                      <strong id="capitalAssetsSummaryTotal">0 ₽</strong>
+                  <div class="assets-summary-grid">
+                    <div class="summary-card summary-card--total">
+                      <span class="summary-label">Всего</span>
+                      <strong id="capitalAssetsSummaryTotal" class="summary-value">0 ₽</strong>
+                      <small class="summary-sub">—</small>
                     </div>
-                    <div class="asset-summary-card invested">
-                      <span>Вложено</span>
-                      <strong id="capitalAssetsSummaryInvested">0 ₽</strong>
+                    <div class="summary-card summary-card--invested">
+                      <span class="summary-label">Вложено</span>
+                      <strong id="capitalAssetsSummaryInvested" class="summary-value">0 ₽</strong>
+                      <small class="summary-sub">—</small>
                     </div>
-                    <div class="asset-summary-card profit">
-                      <span>Прибыль</span>
-                      <strong id="capitalAssetsSummaryProfit">0 ₽</strong>
-                      <small id="capitalAssetsSummaryPercent" class="asset-summary-percent">—</small>
-                      <span id="capitalAssetsSummaryWarning" class="chip chip-warning is-hidden">проверить</span>
+                    <div class="summary-card summary-card--profit is-positive">
+                      <span class="summary-label">Прибыль</span>
+                      <strong id="capitalAssetsSummaryProfit" class="summary-value">0 ₽</strong>
+                      <div class="summary-sub-row">
+                        <small id="capitalAssetsSummaryPercent" class="summary-sub">—</small>
+                        <span id="capitalAssetsSummaryWarning" class="chip chip-warning summary-chip is-hidden">проверь данные</span>
+                      </div>
                     </div>
-                    <div class="asset-summary-card expected">
-                      <span>Потенц. доходность</span>
-                      <strong id="capitalAssetsSummaryExpected">0 ₽</strong>
-                      <small id="capitalAssetsSummaryExpectedNote" class="asset-summary-percent">—</small>
+                    <div class="summary-card summary-card--expected">
+                      <span class="summary-label">Потенц. доходность</span>
+                      <strong id="capitalAssetsSummaryExpected" class="summary-value">0 ₽</strong>
+                      <small id="capitalAssetsSummaryExpectedNote" class="summary-sub">—</small>
                     </div>
                   </div>
 
