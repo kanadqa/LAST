@@ -466,6 +466,8 @@ const buildBackupPayload = () => ({
   settings: {
     view: activeView,
     layout: currentLayout,
+    baseCurrency: capitalState?.settings?.baseCurrency,
+    fxRates: capitalState?.settings?.fxRates,
   },
 });
 
@@ -478,6 +480,13 @@ const applyBackupPayload = async (payload) => {
   transactions = normalizedTransactions;
   categories = normalizedCategories || await loadCategories();
   capitalState = payload.capitalState || await migrateCapitalState();
+  if (payload.settings?.baseCurrency || payload.settings?.fxRates) {
+    capitalState.settings = {
+      ...(capitalState.settings || { baseCurrency: "RUB", fxRates: {} }),
+      baseCurrency: payload.settings?.baseCurrency || capitalState.settings?.baseCurrency || "RUB",
+      fxRates: payload.settings?.fxRates || capitalState.settings?.fxRates || {},
+    };
+  }
   normalizeCapitalState();
   await Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   await Storage.set(CATEGORY_KEY, JSON.stringify(categories));
@@ -492,7 +501,7 @@ const applyBackupPayload = async (payload) => {
 
 let transactions = [];
 let categories = [];
-let historyStack = [];
+let undoStack = [];
 let showAllSubcategories = false;
 let showAllExpenseCategories = false;
 let categoryFilter = "all";
@@ -617,33 +626,54 @@ const touchTransaction = (item, updates = {}) => ({
   updatedAt: new Date().toISOString(),
 });
 
-const pushHistory = () => {
-  historyStack.push({
-    transactions: JSON.parse(JSON.stringify(transactions)),
-    categories: JSON.parse(JSON.stringify(categories)),
-  });
-  if (historyStack.length > 20) {
-    historyStack.shift();
+const recordUndo = (kind, payload) => {
+  if (!["addTx", "editTx", "deleteTx"].includes(kind)) {
+    return;
+  }
+  undoStack.push({ kind, payload, ts: Date.now() });
+  if (undoStack.length > 20) {
+    undoStack.shift();
   }
   updateUndoState();
 };
 
 const undoLastAction = () => {
-  const previous = historyStack.pop();
+  const previous = undoStack.pop();
   if (!previous) {
     return;
   }
-  transactions = previous.transactions;
-  categories = previous.categories;
+
+  if (previous.kind === "addTx") {
+    transactions = transactions.filter((item) => item.id !== previous.payload.id);
+  }
+
+  if (previous.kind === "deleteTx") {
+    const restored = previous.payload;
+    const index = restored.index ?? transactions.length;
+    if (Number.isFinite(index) && index >= 0 && index <= transactions.length) {
+      transactions.splice(index, 0, restored.item);
+    } else {
+      transactions.push(restored.item);
+    }
+  }
+
+  if (previous.kind === "editTx") {
+    const { before } = previous.payload;
+    const index = transactions.findIndex((item) => item.id === before.id);
+    if (index !== -1) {
+      transactions[index] = before;
+    }
+  }
+
   Storage.set(STORAGE_KEY, JSON.stringify(transactions));
-  saveCategories(categories);
-  renderCategories();
-  render();
+  render(activeView);
   updateUndoState();
 };
 
 const updateUndoState = () => {
-  undoButton.disabled = historyStack.length === 0;
+  if (undoButton) {
+    undoButton.disabled = undoStack.length === 0;
+  }
 };
 
 const updateSummary = () => {
@@ -680,10 +710,11 @@ const renderTable = () => {
     return;
   }
 
-  transactions
+  const displayList = transactions
     .slice()
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .forEach((item) => {
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  displayList.forEach((item) => {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${item.date}</td>
@@ -2575,8 +2606,6 @@ const addCategory = () => {
     return;
   }
 
-  pushHistory();
-
   if (categories[name]) {
     if (subName && !categories[name].subs.includes(subName)) {
       categories[name].subs.push(subName);
@@ -2598,7 +2627,6 @@ const renameCategory = (oldName, newName) => {
   if (!newName || oldName === newName || categories[newName]) {
     return;
   }
-  pushHistory();
   const payload = categories[oldName];
   delete categories[oldName];
   categories[newName] = payload;
@@ -2614,7 +2642,6 @@ const renameSubcategory = (categoryName, oldName, newName) => {
   if (!newName || oldName === newName) {
     return;
   }
-  pushHistory();
   categories[categoryName].subs = categories[categoryName].subs.map((item) =>
     item === oldName ? newName : item
   );
@@ -2632,7 +2659,6 @@ const moveSubcategory = (fromCategory, subName, toCategory) => {
   if (fromCategory === toCategory) {
     return;
   }
-  pushHistory();
   categories[fromCategory].subs = categories[fromCategory].subs.filter(
     (item) => item !== subName
   );
@@ -2653,7 +2679,6 @@ const moveCategoryToCategory = (fromCategory, toCategory) => {
   if (fromCategory === toCategory) {
     return;
   }
-  pushHistory();
   const fromSubs = categories[fromCategory].subs || [];
   const toSubs = categories[toCategory].subs || [];
   const merged = [...new Set([...toSubs, fromCategory, ...fromSubs])];
@@ -2677,7 +2702,6 @@ const promoteSubcategoryToCategory = (fromCategory, subName) => {
   if (categories[subName]) {
     return;
   }
-  pushHistory();
   categories[fromCategory].subs = categories[fromCategory].subs.filter(
     (item) => item !== subName
   );
@@ -2695,7 +2719,6 @@ const promoteSubcategoryToCategory = (fromCategory, subName) => {
 };
 
 const deleteSubcategory = (categoryName, subName) => {
-  pushHistory();
   categories[categoryName].subs = categories[categoryName].subs.filter(
     (item) => item !== subName
   );
@@ -2715,7 +2738,6 @@ const deleteCategory = (categoryName) => {
     alert("Нужна хотя бы одна категория.");
     return;
   }
-  pushHistory();
   delete categories[categoryName];
   const fallback = remaining[0];
   transactions = transactions.map((item) =>
@@ -3051,7 +3073,6 @@ const bindEvents = () => {
         return;
       }
 
-      pushHistory();
       const now = new Date().toISOString();
       transactions.push({
         id: generateId("tx"),
@@ -3064,6 +3085,7 @@ const bindEvents = () => {
         createdAt: now,
         updatedAt: now,
       });
+      recordUndo("addTx", { id: transactions[transactions.length - 1].id });
       Storage.set(STORAGE_KEY, JSON.stringify(transactions));
       render();
       resetForm();
@@ -3158,8 +3180,13 @@ on(undoButton, "click", undoLastAction, "undo");
       return;
     }
 
-    pushHistory();
+    const index = transactions.findIndex((item) => item.id === id);
+    const deleted = transactions.find((item) => item.id === id);
+    if (!deleted) {
+      return;
+    }
     transactions = transactions.filter((item) => item.id !== id);
+    recordUndo("deleteTx", { item: deleted, index });
     Storage.set(STORAGE_KEY, JSON.stringify(transactions));
     render();
   }, "удаление операции");
@@ -3201,7 +3228,6 @@ on(clearButton, "click", () => {
   if (!confirm("Удалить все операции?")) {
     return;
   }
-  pushHistory();
   transactions = [];
   Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   render();
@@ -3546,7 +3572,7 @@ onAll(capitalTabs, "click", (event) => {
       await applyBackupPayload(data);
       activeView = data.settings?.view || activeView;
       currentLayout = data.settings?.layout || currentLayout;
-      historyStack = [];
+      undoStack = [];
       renderCategories();
       initializeReportRange();
       updateUndoState();
@@ -3590,4 +3616,8 @@ const initializeApp = safeExec(async () => {
   setView(activeView);
 }, "инициализация приложения");
 
-initializeApp();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApp);
+} else {
+  initializeApp();
+}
