@@ -7,6 +7,9 @@ const expensePercentEl = document.getElementById("expensePercent");
 const exportButton = document.getElementById("exportCsv");
 const clearButton = document.getElementById("clearAll");
 const undoButton = document.getElementById("undoAction");
+const backupButton = document.getElementById("backupJson");
+const restoreInput = document.getElementById("restoreJson");
+const errorBanner = document.getElementById("errorBanner");
 const categorySelect = document.getElementById("category");
 const subcategorySelect = document.getElementById("subcategory");
 const categoryTypeSelect = document.getElementById("categoryType");
@@ -137,6 +140,42 @@ const CAPITAL_KEY_V2 = "budget.capital.v2";
 const CAPITAL_KEY_V1 = "budget.capital.v1";
 const CAPITAL_MIGRATED_KEY = "budget.capital.migrated";
 
+const showError = (message) => {
+  if (!errorBanner) {
+    alert(message);
+    return;
+  }
+  errorBanner.textContent = message;
+  errorBanner.classList.remove("is-hidden");
+};
+
+const clearError = () => {
+  if (errorBanner) {
+    errorBanner.classList.add("is-hidden");
+    errorBanner.textContent = "";
+  }
+};
+
+const safeExec = (fn, context = "operation") => async (...args) => {
+  try {
+    clearError();
+    await fn(...args);
+  } catch (error) {
+    console.error(`Ошибка в ${context}`, error);
+    showError(`Произошла ошибка: ${context}. Проверьте данные и попробуйте снова.`);
+  }
+};
+
+window.addEventListener("error", (event) => {
+  console.error("Глобальная ошибка", event.error || event.message);
+  showError("Произошла ошибка в приложении. Обновите страницу или попробуйте снова.");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("Необработанное отклонение промиса", event.reason);
+  showError("Произошла ошибка при выполнении операции. Проверьте данные.");
+});
+
 const currencyFormatter = new Intl.NumberFormat("ru-RU", {
   style: "currency",
   currency: "RUB",
@@ -162,44 +201,95 @@ const DB_NAME = "budgetAppDb";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 
-const dbOpen = () => new Promise((resolve, reject) => {
-  const request = indexedDB.open(DB_NAME, DB_VERSION);
-  request.onupgradeneeded = () => {
-    const db = request.result;
-    if (!db.objectStoreNames.contains(DB_STORE)) {
-      db.createObjectStore(DB_STORE);
-    }
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
+const Storage = (() => {
+  let dbInstance = null;
 
-const dbGet = async (key) => {
-  const db = await dbOpen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, "readonly");
-    const store = tx.objectStore(DB_STORE);
-    const request = store.get(key);
-    request.onsuccess = () => resolve(request.result ?? null);
+  const dbOpen = () => new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+
+  const init = async () => {
+    if (!dbInstance) {
+      dbInstance = await dbOpen();
+    }
+    return dbInstance;
+  };
+
+  const get = async (key) => {
+    const db = dbInstance || await dbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readonly");
+      const store = tx.objectStore(DB_STORE);
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  const set = async (key, value) => {
+    const db = dbInstance || await dbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readwrite");
+      const store = tx.objectStore(DB_STORE);
+      const request = store.put(value, key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  return { init, get, set };
+})();
+
+const generateId = (prefix = "item") =>
+  (crypto.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+const normalizeTransaction = (item) => {
+  const baseDate = item.date || new Date().toISOString().slice(0, 10);
+  const createdAt = item.createdAt || new Date(baseDate).toISOString();
+  const updatedAt = item.updatedAt || createdAt;
+  const amount = Number.parseFloat(item.amount);
+  return {
+    id: item.id || generateId("tx"),
+    date: baseDate,
+    type: item.type === "income" ? "income" : "expense",
+    category: item.category || "",
+    subcategory: item.subcategory || "",
+    amount: Number.isFinite(amount) ? amount : 0,
+    note: item.note || "",
+    createdAt,
+    updatedAt,
+  };
 };
 
-const dbSet = async (key, value) => {
-  const db = await dbOpen();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(DB_STORE, "readwrite");
-    const store = tx.objectStore(DB_STORE);
-    const request = store.put(value, key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+const normalizeTransactions = (items) => {
+  let migrated = false;
+  const normalized = (Array.isArray(items) ? items : []).map((item) => {
+    const next = normalizeTransaction(item || {});
+    if (!item?.id || !item?.createdAt || !item?.updatedAt || !Number.isFinite(item?.amount)) {
+      migrated = true;
+    }
+    return next;
   });
+  return { normalized, migrated };
 };
 
 const loadTransactions = async () => {
   try {
-    const raw = await dbGet(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = await Storage.get(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    const { normalized, migrated } = normalizeTransactions(parsed);
+    if (migrated) {
+      await Storage.set(STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch (error) {
     console.error("Не удалось загрузить данные", error);
     return [];
@@ -227,7 +317,7 @@ const normalizeCategories = (raw) => {
 
 const loadCategories = async () => {
   try {
-    const raw = await dbGet(CATEGORY_KEY);
+    const raw = await Storage.get(CATEGORY_KEY);
     if (raw) {
       return normalizeCategories(JSON.parse(raw));
     }
@@ -243,7 +333,7 @@ const loadCategories = async () => {
 
 const loadCapitalV2 = async () => {
   try {
-    const raw = await dbGet(CAPITAL_KEY_V2);
+    const raw = await Storage.get(CAPITAL_KEY_V2);
     if (raw) {
       return JSON.parse(raw);
     }
@@ -253,13 +343,11 @@ const loadCapitalV2 = async () => {
   return null;
 };
 
-const saveCapitalV2 = (nextState) => {
-  dbSet(CAPITAL_KEY_V2, JSON.stringify(nextState));
-};
+const saveCapitalV2 = (nextState) => Storage.set(CAPITAL_KEY_V2, JSON.stringify(nextState));
 
 const loadCapitalV1 = async () => {
   try {
-    const raw = await dbGet(CAPITAL_KEY_V1);
+    const raw = await Storage.get(CAPITAL_KEY_V1);
     return raw ? JSON.parse(raw) : null;
   } catch (error) {
     console.error("Не удалось загрузить капитал (v1)", error);
@@ -273,7 +361,7 @@ const migrateCapitalState = async () => {
     return existing;
   }
 
-  const migratedFlag = await dbGet(CAPITAL_MIGRATED_KEY);
+  const migratedFlag = await Storage.get(CAPITAL_MIGRATED_KEY);
   const legacy = await loadCapitalV1();
   const baseState = {
     assets: [],
@@ -288,7 +376,7 @@ const migrateCapitalState = async () => {
 
   if (!legacy || migratedFlag) {
     saveCapitalV2(baseState);
-    dbSet(CAPITAL_MIGRATED_KEY, "true");
+    Storage.set(CAPITAL_MIGRATED_KEY, "true");
     return baseState;
   }
 
@@ -351,12 +439,55 @@ const migrateCapitalState = async () => {
     snapshots: mappedSnapshots,
   };
   saveCapitalV2(migrated);
-  dbSet(CAPITAL_MIGRATED_KEY, "true");
+  Storage.set(CAPITAL_MIGRATED_KEY, "true");
   return migrated;
 };
 
 const saveCategories = (nextCategories) => {
-  dbSet(CATEGORY_KEY, JSON.stringify(nextCategories));
+  Storage.set(CATEGORY_KEY, JSON.stringify(nextCategories));
+};
+
+const downloadJson = (payload, filename) => {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const buildBackupPayload = () => ({
+  version: 1,
+  createdAt: new Date().toISOString(),
+  transactions,
+  categories,
+  capitalState,
+  settings: {
+    view: activeView,
+    layout: currentLayout,
+  },
+});
+
+const applyBackupPayload = async (payload) => {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Некорректный формат backup.");
+  }
+  const normalizedTransactions = normalizeTransactions(payload.transactions || []).normalized;
+  const normalizedCategories = normalizeCategories(payload.categories || {});
+  transactions = normalizedTransactions;
+  categories = normalizedCategories || await loadCategories();
+  capitalState = payload.capitalState || await migrateCapitalState();
+  normalizeCapitalState();
+  await Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+  await Storage.set(CATEGORY_KEY, JSON.stringify(categories));
+  await saveCapitalV2(capitalState);
+  if (payload.settings?.view) {
+    await Storage.set(VIEW_KEY, payload.settings.view);
+  }
+  if (payload.settings?.layout) {
+    await Storage.set(LAYOUT_KEY, payload.settings.layout);
+  }
 };
 
 let transactions = [];
@@ -370,17 +501,32 @@ let reportRange = { start: "", end: "" };
 let capitalState = null;
 let capitalOverviewFilter = "all";
 let capitalEditingAssetId = null;
+let activeView = "dashboard";
+let currentLayout = "comfort";
 
 const capitalIsUnconvertible = (asset) =>
   asset.currency !== capitalState?.settings?.baseCurrency
   && !capitalState?.settings?.fxRates?.[asset.currency];
+
+const normalizeCurrency = (value, fallback = "RUB") => {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim().toUpperCase();
+  return trimmed || fallback;
+};
+
+const sanitizeNumber = (value, fallback = 0) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 const normalizeCapitalState = () => {
   if (!capitalState) {
     return;
   }
   capitalState.settings = capitalState.settings || { baseCurrency: "RUB", fxRates: {} };
-  capitalState.settings.baseCurrency = capitalState.settings.baseCurrency || "RUB";
+  capitalState.settings.baseCurrency = normalizeCurrency(capitalState.settings.baseCurrency, "RUB");
   capitalState.settings.fxRates = capitalState.settings.fxRates || {};
   if (!capitalState.assetCategories) {
     capitalState.assetCategories = [];
@@ -396,17 +542,24 @@ const normalizeCapitalState = () => {
     const maturityDate = asset.maturityDate || (isDeposit ? asset.unlockDate : "") || "";
     const liquidity = maturityDate ? "locked" : (asset.liquidity || "high");
     const categoryFallback = asset.section || (isDeposit ? "Вклады" : "В наличии");
+    const currency = normalizeCurrency(asset.currency, capitalState.settings.baseCurrency);
+    const amount = sanitizeNumber(asset.amount);
+    const invested = sanitizeNumber(asset.invested ?? amount);
     return {
+      id: asset.id || generateId("asset"),
+      updatedAt: asset.updatedAt || new Date().toISOString(),
       section: asset.section || (isDeposit ? "Вклады" : "В наличии"),
       category: asset.category || categoryFallback,
       subcategory: asset.subcategory || "",
-      invested: asset.invested ?? asset.amount ?? 0,
+      invested,
       liquidity,
       liquidityDays: asset.liquidityDays ?? null,
       expectedProfit: isDeposit ? (asset.expectedProfit ?? null) : null,
       maturityDate,
       unconvertible: asset.unconvertible ?? false,
       ...asset,
+      currency,
+      amount,
     };
   });
   capitalState.assets = capitalState.assets.map((asset) => ({
@@ -429,12 +582,40 @@ const normalizeCapitalState = () => {
       subs: [...subs],
     }));
   }
-  capitalState.debts = capitalState.debts || [];
-  capitalState.goals = capitalState.goals || [];
-  capitalState.snapshots = capitalState.snapshots || [];
+  capitalState.debts = (capitalState.debts || []).map((debt) => ({
+    id: debt.id || generateId("debt"),
+    updatedAt: debt.updatedAt || new Date().toISOString(),
+    currency: normalizeCurrency(debt.currency, capitalState.settings.baseCurrency),
+    principal: sanitizeNumber(debt.principal),
+    apr: debt.apr === null ? null : sanitizeNumber(debt.apr, null),
+    paymentMin: debt.paymentMin === null ? null : sanitizeNumber(debt.paymentMin, null),
+    ...debt,
+  }));
+  capitalState.goals = (capitalState.goals || []).map((goal) => ({
+    id: goal.id || generateId("goal"),
+    updatedAt: goal.updatedAt || new Date().toISOString(),
+    targetAmount: sanitizeNumber(goal.targetAmount, 0),
+    baselineAmount: goal.baselineAmount === null ? null : sanitizeNumber(goal.baselineAmount, null),
+    ...goal,
+  }));
+  capitalState.snapshots = (capitalState.snapshots || []).map((snap) => ({
+    id: snap.id || generateId("snapshot"),
+    updatedAt: snap.updatedAt || new Date().toISOString(),
+    assetsTotal: sanitizeNumber(snap.assetsTotal, 0),
+    debtsTotal: sanitizeNumber(snap.debtsTotal, 0),
+    netWorth: sanitizeNumber(snap.netWorth, 0),
+    delta: sanitizeNumber(snap.delta, 0),
+    ...snap,
+  }));
 };
 
 normalizeCapitalState();
+
+const touchTransaction = (item, updates = {}) => ({
+  ...item,
+  ...updates,
+  updatedAt: new Date().toISOString(),
+});
 
 const pushHistory = () => {
   historyStack.push({
@@ -454,7 +635,7 @@ const undoLastAction = () => {
   }
   transactions = previous.transactions;
   categories = previous.categories;
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
   render();
@@ -502,7 +683,7 @@ const renderTable = () => {
   transactions
     .slice()
     .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .forEach((item, index) => {
+    .forEach((item) => {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${item.date}</td>
@@ -511,7 +692,7 @@ const renderTable = () => {
         <td>${item.subcategory || "—"}</td>
         <td>${currencyFormatter.format(item.amount)}</td>
         <td>${item.note || "—"}</td>
-        <td><button class="button secondary" data-index="${index}">Удалить</button></td>
+        <td><button class="button secondary" data-id="${item.id}">Удалить</button></td>
       `;
       tableBody.appendChild(row);
     });
@@ -933,6 +1114,7 @@ const renderCategories = () => {
   renderCategoryOptions();
   renderCategoryListOptions();
   renderCategoryManager();
+  updateTransactionFormState();
 };
 
 const updateSubcategoryOptions = (categoryName) => {
@@ -2250,6 +2432,7 @@ const capitalAddAsset = () => {
   const investedInput = capitalAssetInvested.value;
   const invested = Number.parseFloat(investedInput);
   if (!name || Number.isNaN(invested)) {
+    showError("Заполните название и сумму актива.");
     return;
   }
   const subcategoryValue = capitalAssetSubcategory.value.trim();
@@ -2309,6 +2492,7 @@ const capitalAddDebt = () => {
   const name = capitalDebtName.value.trim();
   const principal = Number.parseFloat(capitalDebtPrincipal.value);
   if (!name || Number.isNaN(principal)) {
+    showError("Заполните название и сумму долга.");
     return;
   }
   capitalState.debts.push({
@@ -2334,6 +2518,7 @@ const capitalAddGoal = () => {
   const targetAmount = Number.parseFloat(capitalGoalTarget.value);
   const targetDate = capitalGoalDate.value;
   if (!name || Number.isNaN(targetAmount) || !targetDate) {
+    showError("Заполните название цели, сумму и дату.");
     return;
   }
   capitalState.goals.push({
@@ -2344,6 +2529,7 @@ const capitalAddGoal = () => {
     targetDate,
     baselineAmount: capitalGoalBaseline.value ? Number.parseFloat(capitalGoalBaseline.value) : null,
     note: capitalGoalNote.value.trim(),
+    updatedAt: capitalNowIso(),
   });
   saveCapitalV2(capitalState);
   capitalGoalForm.reset();
@@ -2365,14 +2551,17 @@ const capitalCreateSnapshotNow = () => {
     existing.debtsTotal = totals.debtsTotal;
     existing.netWorth = totals.netWorth;
     existing.delta = delta;
+    existing.updatedAt = capitalNowIso();
   } else {
     capitalState.snapshots.push({
+      id: capitalGenerateId("snapshot"),
       month,
       assetsTotal: totals.assetsTotal,
       debtsTotal: totals.debtsTotal,
       netWorth: totals.netWorth,
       delta,
       note: "",
+      updatedAt: capitalNowIso(),
     });
   }
   saveCapitalV2(capitalState);
@@ -2414,9 +2603,9 @@ const renameCategory = (oldName, newName) => {
   delete categories[oldName];
   categories[newName] = payload;
   transactions = transactions.map((item) =>
-    item.category === oldName ? { ...item, category: newName } : item
+    item.category === oldName ? touchTransaction(item, { category: newName }) : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2431,10 +2620,10 @@ const renameSubcategory = (categoryName, oldName, newName) => {
   );
   transactions = transactions.map((item) =>
     item.category === categoryName && item.subcategory === oldName
-      ? { ...item, subcategory: newName }
+      ? touchTransaction(item, { subcategory: newName })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2452,10 +2641,10 @@ const moveSubcategory = (fromCategory, subName, toCategory) => {
   }
   transactions = transactions.map((item) =>
     item.category === fromCategory && item.subcategory === subName
-      ? { ...item, category: toCategory }
+      ? touchTransaction(item, { category: toCategory })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2476,10 +2665,10 @@ const moveCategoryToCategory = (fromCategory, toCategory) => {
       return item;
     }
     const nextSubcategory = item.subcategory || fromCategory;
-    return { ...item, category: toCategory, subcategory: nextSubcategory };
+    return touchTransaction(item, { category: toCategory, subcategory: nextSubcategory });
   });
 
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2496,11 +2685,11 @@ const promoteSubcategoryToCategory = (fromCategory, subName) => {
 
   transactions = transactions.map((item) =>
     item.category === fromCategory && item.subcategory === subName
-      ? { ...item, category: subName, subcategory: "" }
+      ? touchTransaction(item, { category: subName, subcategory: "" })
       : item
   );
 
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2512,10 +2701,10 @@ const deleteSubcategory = (categoryName, subName) => {
   );
   transactions = transactions.map((item) =>
     item.category === categoryName && item.subcategory === subName
-      ? { ...item, subcategory: "" }
+      ? touchTransaction(item, { subcategory: "" })
       : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2530,9 +2719,9 @@ const deleteCategory = (categoryName) => {
   delete categories[categoryName];
   const fallback = remaining[0];
   transactions = transactions.map((item) =>
-    item.category === categoryName ? { ...item, category: fallback, subcategory: "" } : item
+    item.category === categoryName ? touchTransaction(item, { category: fallback, subcategory: "" }) : item
   );
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   saveCategories(categories);
   renderCategories();
 };
@@ -2743,11 +2932,29 @@ const handleDrop = (event) => {
   }
 };
 
-const render = () => {
-  updateSummary();
-  renderTable();
-  renderCharts();
-  renderReports();
+const render = (viewId = activeView) => {
+  if (viewId === "dashboard") {
+    updateSummary();
+    renderCharts();
+    return;
+  }
+  if (viewId === "transactions") {
+    updateSummary();
+    renderTable();
+    return;
+  }
+  if (viewId === "categories") {
+    renderCategories();
+    return;
+  }
+  if (viewId === "reports") {
+    updateSummary();
+    renderReports();
+    return;
+  }
+  if (viewId === "capital") {
+    renderCapitalView();
+  }
 };
 
 const initializeReportRange = () => {
@@ -2772,158 +2979,192 @@ const resetForm = () => {
   }
 };
 
+const transactionSubmitButton = form?.querySelector("button[type='submit']");
+
+const updateTransactionFormState = () => {
+  if (!form || !transactionSubmitButton) {
+    return;
+  }
+  const date = document.getElementById("date")?.value;
+  const category = categorySelect?.value;
+  const amount = Number.parseFloat(document.getElementById("amount")?.value);
+  const isValid = Boolean(date) && Boolean(category) && Number.isFinite(amount) && amount > 0;
+  transactionSubmitButton.disabled = !isValid;
+};
+
 const setView = (viewId) => {
-  const page = document.body.dataset.page || "main";
-  if (viewId === "capital" && page === "main") {
-    window.location.href = "capital.html";
-    return;
-  }
-  if (viewId !== "capital" && page === "capital") {
-    window.location.href = `index.html?view=${viewId}`;
-    return;
-  }
+  const availableViews = [...views].map((view) => view.dataset.view);
+  const targetView = availableViews.includes(viewId) ? viewId : "dashboard";
+  activeView = targetView;
   views.forEach((view) => {
-    view.classList.toggle("is-active", view.dataset.view === viewId);
+    view.classList.toggle("is-active", view.dataset.view === targetView);
   });
   navLinks.forEach((link) => {
-    link.classList.toggle("is-active", link.dataset.viewTarget === viewId);
+    link.classList.toggle("is-active", link.dataset.viewTarget === targetView);
   });
-  const activeLabel = [...navLinks].find((link) => link.dataset.viewTarget === viewId);
+  const activeLabel = [...navLinks].find((link) => link.dataset.viewTarget === targetView);
   if (activeLabel) {
     viewTitle.textContent = activeLabel.textContent;
   }
-  dbSet(VIEW_KEY, viewId);
-  if (viewId === "capital") {
-    renderCapitalView();
-  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", targetView);
+  window.history.replaceState({}, "", url);
+  Storage.set(VIEW_KEY, targetView);
+  render(targetView);
 };
 
 const setLayout = (layout) => {
   document.body.classList.remove("layout-comfort", "layout-balanced", "layout-compact");
   document.body.classList.add(`layout-${layout}`);
+  currentLayout = layout;
   layoutButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.layout === layout);
   });
-  dbSet(LAYOUT_KEY, layout);
+  Storage.set(LAYOUT_KEY, layout);
 };
 
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const date = document.getElementById("date").value;
-  const type = document.getElementById("type").value;
-  const category = categorySelect.value;
-  const subcategory = subcategorySelect.value || "";
-  const amount = Number.parseFloat(document.getElementById("amount").value);
-  const note = document.getElementById("note").value.trim();
+const bindEvents = () => {
+  const on = (element, event, handler, context) => {
+    if (!element) {
+      return;
+    }
+    element.addEventListener(event, safeExec(handler, context || event));
+  };
+  const onAll = (list, event, handler, context) => {
+    if (!list || list.length === 0) {
+      return;
+    }
+    list.forEach((element) => on(element, event, handler, context));
+  };
+  if (form) {
+    form.addEventListener("submit", safeExec((event) => {
+      event.preventDefault();
+      const date = document.getElementById("date").value;
+      const type = document.getElementById("type").value;
+      const category = categorySelect.value;
+      const subcategory = subcategorySelect.value || "";
+      const amount = Number.parseFloat(document.getElementById("amount").value);
+      const note = document.getElementById("note").value.trim();
 
-  if (!date || !category || Number.isNaN(amount)) {
-    return;
+      if (!date || !category || Number.isNaN(amount) || amount <= 0) {
+        showError("Заполните дату, категорию и сумму больше нуля.");
+        return;
+      }
+
+      pushHistory();
+      const now = new Date().toISOString();
+      transactions.push({
+        id: generateId("tx"),
+        date,
+        type,
+        category,
+        subcategory,
+        amount,
+        note,
+        createdAt: now,
+        updatedAt: now,
+      });
+      Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+      render();
+      resetForm();
+      updateTransactionFormState();
+    }, "добавление операции"));
+    const formFields = form.querySelectorAll("input, select");
+    formFields.forEach((field) => {
+      on(field, "input", updateTransactionFormState, "валидация формы");
+      on(field, "change", updateTransactionFormState, "валидация формы");
+    });
   }
 
-  pushHistory();
-  transactions.push({ date, type, category, subcategory, amount, note });
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
-  render();
-  resetForm();
-});
-
-document.getElementById("type").addEventListener("change", () => {
+on(document.getElementById("type"), "change", () => {
   renderCategoryOptions();
-});
+}, "смена типа операции");
 
-categorySelect.addEventListener("change", (event) => {
+on(categorySelect, "change", (event) => {
   updateSubcategoryOptions(event.target.value);
-});
+}, "смена категории");
 
-addCategoryButton.addEventListener("click", addCategory);
+on(addCategoryButton, "click", addCategory, "добавление категории");
 
-categoryTypeSelect.addEventListener("change", () => {
+on(categoryTypeSelect, "change", () => {
   renderCategoryListOptions();
-});
+}, "тип категории");
 
-newCategoryInput.addEventListener("input", () => {
+on(newCategoryInput, "input", () => {
   const name = newCategoryInput.value.trim();
   if (categories[name]) {
     categoryTypeSelect.value = categories[name].type;
     renderCategoryListOptions();
   }
-});
+}, "ввод категории");
 
-newCategoryInput.addEventListener("keydown", (event) => {
+on(newCategoryInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     addCategory();
   }
-});
+}, "ввод категории");
 
-newSubcategoryInput.addEventListener("keydown", (event) => {
+on(newSubcategoryInput, "keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     addCategory();
   }
-});
+}, "ввод подкатегории");
 
-navLinks.forEach((link) => {
-  link.addEventListener("click", (event) => {
-    event.preventDefault();
-    setView(link.dataset.viewTarget);
+onAll(navLinks, "click", (event) => {
+  event.preventDefault();
+  setView(event.currentTarget.dataset.viewTarget);
+}, "навигация");
+
+onAll(layoutButtons, "click", (event) => setLayout(event.currentTarget.dataset.layout), "layout");
+
+onAll(filterTabs, "click", (event) => {
+  filterTabs.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  categoryFilter = event.currentTarget.dataset.filter;
+  renderCategoryManager();
+}, "фильтр категорий");
+
+onAll(categoryScopeButtons, "click", (event) => {
+  categoryScopeButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  const scope = event.currentTarget.dataset.categoryScope;
+  categoryPanels.forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.categoryPanel === scope);
   });
-});
+}, "переключение панели");
 
-layoutButtons.forEach((button) => {
-  button.addEventListener("click", () => setLayout(button.dataset.layout));
-});
+on(categoryManager, "dragstart", handleDragStart, "dragstart");
+on(categoryManager, "dragend", handleDragEnd, "dragend");
+on(categoryManager, "dragover", handleDragOver, "dragover");
+on(categoryManager, "dragleave", handleDragLeave, "dragleave");
+on(categoryManager, "drop", handleDrop, "drop");
+on(rootDropzone, "dragover", handleDragOver, "dragover");
+on(rootDropzone, "dragleave", handleDragLeave, "dragleave");
+on(rootDropzone, "drop", handleDrop, "drop");
+on(rootDropzone, "dragend", handleDragEnd, "dragend");
 
-filterTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    filterTabs.forEach((item) => item.classList.remove("is-active"));
-    tab.classList.add("is-active");
-    categoryFilter = tab.dataset.filter;
-    renderCategoryManager();
-  });
-});
+on(undoButton, "click", undoLastAction, "undo");
 
-categoryScopeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    categoryScopeButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const scope = button.dataset.categoryScope;
-    categoryPanels.forEach((panel) => {
-      panel.classList.toggle("is-active", panel.dataset.categoryPanel === scope);
-    });
-  });
-});
+  on(tableBody, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
 
-categoryManager.addEventListener("dragstart", handleDragStart);
-categoryManager.addEventListener("dragend", handleDragEnd);
-categoryManager.addEventListener("dragover", handleDragOver);
-categoryManager.addEventListener("dragleave", handleDragLeave);
-categoryManager.addEventListener("drop", handleDrop);
-rootDropzone.addEventListener("dragover", handleDragOver);
-rootDropzone.addEventListener("dragleave", handleDragLeave);
-rootDropzone.addEventListener("drop", handleDrop);
-rootDropzone.addEventListener("dragend", handleDragEnd);
+    const id = target.dataset.id;
+    if (!id) {
+      return;
+    }
 
-undoButton.addEventListener("click", undoLastAction);
+    pushHistory();
+    transactions = transactions.filter((item) => item.id !== id);
+    Storage.set(STORAGE_KEY, JSON.stringify(transactions));
+    render();
+  }, "удаление операции");
 
-tableBody.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-
-  const index = Number.parseInt(target.dataset.index, 10);
-  if (Number.isNaN(index)) {
-    return;
-  }
-
-  pushHistory();
-  transactions.splice(index, 1);
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
-  render();
-});
-
-exportButton.addEventListener("click", () => {
+on(exportButton, "click", () => {
   if (transactions.length === 0) {
     alert("Добавьте операции перед экспортом.");
     return;
@@ -2954,112 +3195,95 @@ exportButton.addEventListener("click", () => {
   link.download = `budget-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-});
+}, "экспорт CSV");
 
-clearButton.addEventListener("click", () => {
+on(clearButton, "click", () => {
   if (!confirm("Удалить все операции?")) {
     return;
   }
   pushHistory();
   transactions = [];
-  dbSet(STORAGE_KEY, JSON.stringify(transactions));
+  Storage.set(STORAGE_KEY, JSON.stringify(transactions));
   render();
-});
+}, "очистка данных");
 
-toggleSubcategoryButton.addEventListener("click", () => {
+on(toggleSubcategoryButton, "click", () => {
   showAllSubcategories = !showAllSubcategories;
   renderCharts();
-});
+}, "переключение диаграммы подкатегорий");
 
-toggleExpenseCategoryButton.addEventListener("click", () => {
+on(toggleExpenseCategoryButton, "click", () => {
   showAllExpenseCategories = !showAllExpenseCategories;
   renderCharts();
-});
+}, "переключение диаграммы категорий");
 
-reportRangeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const range = button.dataset.reportRange;
-    if (range === "all") {
-      const bounds = getDateBounds(transactions);
-      setReportRange(bounds.start, bounds.end);
-    } else {
-      const days = Number.parseInt(range, 10);
-      const bounds = getDateBounds(transactions);
-      const end = bounds.end || new Date().toISOString().slice(0, 10);
-      const endDate = new Date(end);
-      const startDate = new Date(endDate);
-      startDate.setDate(endDate.getDate() - (days - 1));
-      setReportRange(startDate.toISOString().slice(0, 10), end);
-    }
-    renderReports();
-  });
-});
+onAll(reportRangeButtons, "click", (event) => {
+  reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  const range = event.currentTarget.dataset.reportRange;
+  if (range === "all") {
+    const bounds = getDateBounds(transactions);
+    setReportRange(bounds.start, bounds.end);
+  } else {
+    const days = Number.parseInt(range, 10);
+    const bounds = getDateBounds(transactions);
+    const end = bounds.end || new Date().toISOString().slice(0, 10);
+    const endDate = new Date(end);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - (days - 1));
+    setReportRange(startDate.toISOString().slice(0, 10), end);
+  }
+  renderReports();
+}, "диапазон отчета");
 
-reportGranularityButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    reportGranularityButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    reportGranularity = button.dataset.reportGranularity;
-    renderReports();
-  });
-});
+onAll(reportGranularityButtons, "click", (event) => {
+  reportGranularityButtons.forEach((item) => item.classList.remove("is-active"));
+  event.currentTarget.classList.add("is-active");
+  reportGranularity = event.currentTarget.dataset.reportGranularity;
+  renderReports();
+}, "гранулярность отчета");
 
-applyReportRangeButton.addEventListener("click", () => {
+on(applyReportRangeButton, "click", () => {
   reportRangeButtons.forEach((item) => item.classList.remove("is-active"));
   setReportRange(reportStartInput.value, reportEndInput.value);
   renderReports();
-});
+}, "ручной диапазон отчета");
 
-capitalTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    capitalSetTab(tab.dataset.capitalTab);
-  });
-});
+onAll(capitalTabs, "click", (event) => {
+  capitalSetTab(event.currentTarget.dataset.capitalTab);
+}, "капитал табы");
 
-if (capitalAssetDrawer) {
-  capitalSetAssetDrawer(false);
-}
+  if (capitalAssetDrawer) {
+    capitalSetAssetDrawer(false);
+  }
 
-if (capitalAssetToggle) {
-  capitalAssetToggle.addEventListener("click", () => {
+  on(capitalAssetToggle, "click", () => {
     capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
     if (capitalAssetDrawer.classList.contains("is-open")) {
       capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  });
-}
+  }, "toggle drawer");
 
-if (capitalAssetToggleButtons.length) {
-  capitalAssetToggleButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
-      if (capitalAssetDrawer.classList.contains("is-open")) {
-        capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    });
-  });
-}
+  onAll(capitalAssetToggleButtons, "click", () => {
+    capitalSetAssetDrawer(!capitalAssetDrawer.classList.contains("is-open"));
+    if (capitalAssetDrawer.classList.contains("is-open")) {
+      capitalAssetDrawer.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, "toggle drawer");
 
-if (capitalAssetClose) {
-  capitalAssetClose.addEventListener("click", () => {
+  on(capitalAssetClose, "click", () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
-  });
-}
+  }, "close asset");
 
-if (capitalAssetOverlay) {
-  capitalAssetOverlay.addEventListener("click", () => {
+  on(capitalAssetOverlay, "click", () => {
     capitalSetAssetModal(false);
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
-  });
-}
+  }, "overlay asset");
 
-if (capitalAssetDelete) {
-  capitalAssetDelete.addEventListener("click", () => {
+  on(capitalAssetDelete, "click", () => {
     if (!capitalEditingAssetId || !confirm("Удалить актив?")) {
       return;
     }
@@ -3069,84 +3293,70 @@ if (capitalAssetDelete) {
     capitalSetAssetDrawer(false);
     capitalResetAssetForm();
     renderCapitalView();
-  });
-}
+  }, "удаление актива");
 
-capitalAssetForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddAsset();
-});
+  on(capitalAssetForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddAsset();
+  }, "добавление актива");
 
-if (capitalBaseCurrency) {
-  capitalBaseCurrency.addEventListener("change", () => {
+  on(capitalBaseCurrency, "change", () => {
     capitalState.settings.baseCurrency = capitalBaseCurrency.value;
     saveCapitalV2(capitalState);
     renderCapitalView();
     refreshFxRate();
-  });
-}
+  }, "смена валюты");
 
-if (capitalFxRefresh) {
-  capitalFxRefresh.addEventListener("click", () => {
+  on(capitalFxRefresh, "click", () => {
     refreshFxRate();
-  });
-}
+  }, "обновление FX");
 
-if (capitalFxCurrency) {
-  capitalFxCurrency.addEventListener("blur", () => {
+  on(capitalFxCurrency, "blur", () => {
     refreshFxRate();
-  });
-}
+  }, "обновление FX");
 
-if (capitalAssetCurrency && capitalFxCurrency) {
-  capitalAssetCurrency.addEventListener("change", () => {
+  on(capitalAssetCurrency, "change", () => {
+    if (!capitalFxCurrency) {
+      return;
+    }
     const currency = capitalAssetCurrency.value.trim().toUpperCase();
     if (currency) {
       capitalFxCurrency.value = currency;
       refreshFxRate();
     }
-  });
-}
+  }, "смена валюты актива");
 
-capitalStructureButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  onAll(capitalStructureButtons, "click", (event) => {
     capitalStructureButtons.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    const mode = button.dataset.capitalStructure;
+    event.currentTarget.classList.add("is-active");
+    const mode = event.currentTarget.dataset.capitalStructure;
     capitalAssetTypeChart.classList.toggle("is-hidden", mode !== "bars");
     capitalAssetTypePie.classList.toggle("is-hidden", mode !== "pie");
-  });
-});
+  }, "структура капитала");
 
-if (capitalAssetViewButtons.length) {
-  capitalAssetViewButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      capitalAssetViewButtons.forEach((item) => item.classList.remove("is-active"));
-      button.classList.add("is-active");
-      capitalAssetPanels.forEach((panel) => {
-        panel.classList.toggle("is-active", panel.dataset.capitalAssetPanel === button.dataset.capitalAssetView);
-      });
+  onAll(capitalAssetViewButtons, "click", (event) => {
+    capitalAssetViewButtons.forEach((item) => item.classList.remove("is-active"));
+    event.currentTarget.classList.add("is-active");
+    capitalAssetPanels.forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.capitalAssetPanel === event.currentTarget.dataset.capitalAssetView);
     });
-  });
-}
+  }, "вид активов");
 
-if (capitalCategoryForm) {
-  capitalCategoryForm.addEventListener("submit", (event) => {
+  on(capitalCategoryForm, "submit", (event) => {
     event.preventDefault();
     const category = capitalCategoryName.value.trim();
     const subcategory = capitalSubcategoryName.value.trim();
     if (!category) {
+      showError("Введите название категории капитала.");
       return;
     }
     capitalEnsureCategory(category, subcategory);
     saveCapitalV2(capitalState);
     renderCapitalCategories();
     capitalCategoryForm.reset();
-  });
-}
+  }, "категории капитала");
 
-if (capitalCategoryManager) {
-  capitalCategoryManager.addEventListener("click", (event) => {
+  on(capitalCategoryManager, "click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLButtonElement)) {
       return;
@@ -3168,184 +3378,216 @@ if (capitalCategoryManager) {
       saveCapitalV2(capitalState);
       renderCapitalCategories();
     }
-  });
-}
+  }, "удаление категории капитала");
 
-capitalOverviewFilters.forEach((button) => {
-  button.addEventListener("click", () => {
+  onAll(capitalOverviewFilters, "click", (event) => {
     capitalOverviewFilters.forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    capitalOverviewFilter = button.dataset.capitalFilter;
+    event.currentTarget.classList.add("is-active");
+    capitalOverviewFilter = event.currentTarget.dataset.capitalFilter;
     renderCapitalLedger();
-  });
-});
+  }, "фильтр капитала");
 
-capitalAssetType.addEventListener("change", () => {
-  const isDeposit = capitalAssetType.value === "deposit";
-  capitalAssetExpectedProfit.disabled = !isDeposit;
-  capitalAssetMaturityDate.disabled = !isDeposit;
-  if (!isDeposit) {
-    capitalAssetExpectedProfit.value = "";
-    capitalAssetMaturityDate.value = "";
-  }
-});
+  on(capitalAssetType, "change", () => {
+    const isDeposit = capitalAssetType.value === "deposit";
+    capitalAssetExpectedProfit.disabled = !isDeposit;
+    capitalAssetMaturityDate.disabled = !isDeposit;
+    if (!isDeposit) {
+      capitalAssetExpectedProfit.value = "";
+      capitalAssetMaturityDate.value = "";
+    }
+  }, "тип актива");
 
-capitalAssetsTable.addEventListener("click", (event) => {
-  const row = event.target.closest("tr");
-  if (!row || !row.dataset.assetId) {
-    return;
-  }
-  const asset = capitalState.assets.find((item) => item.id === row.dataset.assetId);
-  if (!asset) {
-    return;
-  }
-  capitalFillAssetForm(asset);
-});
+  on(capitalAssetsTable, "click", (event) => {
+    const row = event.target.closest("tr");
+    if (!row || !row.dataset.assetId) {
+      return;
+    }
+    const asset = capitalState.assets.find((item) => item.id === row.dataset.assetId);
+    if (!asset) {
+      return;
+    }
+    capitalFillAssetForm(asset);
+  }, "редактирование актива");
 
-capitalDebtForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddDebt();
-});
+  on(capitalDebtForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddDebt();
+  }, "добавление долга");
 
-capitalDebtsTable.addEventListener("input", (event) => {
-  const target = event.target;
-  const row = target.closest("tr");
-  if (!row || !row.dataset.debtId) {
-    return;
-  }
-  const field = target.dataset.field;
-  if (!field) {
-    return;
-  }
-  capitalUpdateDebt(row.dataset.debtId, field, target.value);
-});
+  on(capitalDebtsTable, "input", (event) => {
+    const target = event.target;
+    const row = target.closest("tr");
+    if (!row || !row.dataset.debtId) {
+      return;
+    }
+    const field = target.dataset.field;
+    if (!field) {
+      return;
+    }
+    capitalUpdateDebt(row.dataset.debtId, field, target.value);
+  }, "обновление долга");
 
-capitalDebtsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const id = target.dataset.debtDelete;
-  if (!id || !confirm("Удалить долг?")) {
-    return;
-  }
-  capitalState.debts = capitalState.debts.filter((item) => item.id !== id);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalExtraPayment.addEventListener("input", () => {
-  renderCapitalPayoff();
-});
-
-capitalGoalForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  capitalAddGoal();
-});
-
-capitalGoalsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const id = target.dataset.goalDelete;
-  if (!id || !confirm("Удалить цель?")) {
-    return;
-  }
-  capitalState.goals = capitalState.goals.filter((item) => item.id !== id);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalSnapshotNow.addEventListener("click", () => {
-  capitalCreateSnapshotNow();
-});
-
-capitalSnapshotsTable.addEventListener("input", (event) => {
-  const target = event.target;
-  const row = target.closest("tr");
-  if (!row || !row.dataset.snapshotMonth) {
-    return;
-  }
-  if (target.dataset.field !== "note") {
-    return;
-  }
-  capitalUpdateSnapshotNote(row.dataset.snapshotMonth, target.value);
-});
-
-capitalSnapshotsTable.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-  const month = target.dataset.snapshotDelete;
-  if (!month || !confirm("Удалить снимок?")) {
-    return;
-  }
-  capitalState.snapshots = capitalState.snapshots.filter((item) => item.month !== month);
-  saveCapitalV2(capitalState);
-  renderCapitalView();
-});
-
-capitalExportButton.addEventListener("click", () => {
-  const payload = JSON.stringify(capitalState, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "capital.json";
-  link.click();
-  URL.revokeObjectURL(url);
-});
-
-capitalImportInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    capitalState = {
-      assets: data.assets || [],
-      debts: data.debts || [],
-      goals: data.goals || [],
-      snapshots: data.snapshots || [],
-      settings: data.settings || { baseCurrency: "RUB", fxRates: {} },
-    };
-    normalizeCapitalState();
+  on(capitalDebtsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const id = target.dataset.debtDelete;
+    if (!id || !confirm("Удалить долг?")) {
+      return;
+    }
+    capitalState.debts = capitalState.debts.filter((item) => item.id !== id);
     saveCapitalV2(capitalState);
     renderCapitalView();
-  } catch (error) {
-    alert("Не удалось импортировать файл.");
-  } finally {
-    capitalImportInput.value = "";
-  }
-});
+  }, "удаление долга");
 
-const initializeApp = async () => {
+  on(capitalExtraPayment, "input", () => {
+    renderCapitalPayoff();
+  }, "доп платеж");
+
+  on(capitalGoalForm, "submit", (event) => {
+    event.preventDefault();
+    capitalAddGoal();
+  }, "добавление цели");
+
+  on(capitalGoalsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const id = target.dataset.goalDelete;
+    if (!id || !confirm("Удалить цель?")) {
+      return;
+    }
+    capitalState.goals = capitalState.goals.filter((item) => item.id !== id);
+    saveCapitalV2(capitalState);
+    renderCapitalView();
+  }, "удаление цели");
+
+  on(capitalSnapshotNow, "click", () => {
+    capitalCreateSnapshotNow();
+  }, "снимок капитала");
+
+  on(capitalSnapshotsTable, "input", (event) => {
+    const target = event.target;
+    const row = target.closest("tr");
+    if (!row || !row.dataset.snapshotMonth) {
+      return;
+    }
+    if (target.dataset.field !== "note") {
+      return;
+    }
+    capitalUpdateSnapshotNote(row.dataset.snapshotMonth, target.value);
+  }, "заметка снимка");
+
+  on(capitalSnapshotsTable, "click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const month = target.dataset.snapshotDelete;
+    if (!month || !confirm("Удалить снимок?")) {
+      return;
+    }
+    capitalState.snapshots = capitalState.snapshots.filter((item) => item.month !== month);
+    saveCapitalV2(capitalState);
+    renderCapitalView();
+  }, "удаление снимка");
+
+  on(capitalExportButton, "click", () => {
+    const payload = JSON.stringify(capitalState, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "capital.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, "экспорт капитала");
+
+  on(capitalImportInput, "change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      capitalState = {
+        assets: data.assets || [],
+        debts: data.debts || [],
+        goals: data.goals || [],
+        snapshots: data.snapshots || [],
+        settings: data.settings || { baseCurrency: "RUB", fxRates: {} },
+      };
+      normalizeCapitalState();
+      saveCapitalV2(capitalState);
+      renderCapitalView();
+    } catch (error) {
+      showError("Не удалось импортировать файл капитала.");
+    } finally {
+      capitalImportInput.value = "";
+    }
+  }, "импорт капитала");
+
+  on(backupButton, "click", () => {
+    const payload = buildBackupPayload();
+    downloadJson(payload, `budget-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  }, "backup");
+
+  on(restoreInput, "change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await applyBackupPayload(data);
+      activeView = data.settings?.view || activeView;
+      currentLayout = data.settings?.layout || currentLayout;
+      historyStack = [];
+      renderCategories();
+      initializeReportRange();
+      updateUndoState();
+      updateTransactionFormState();
+      capitalSetTab("overview");
+      setLayout(currentLayout);
+      setView(activeView);
+    } catch (error) {
+      showError("Не удалось восстановить backup.");
+    } finally {
+      restoreInput.value = "";
+    }
+  }, "restore");
+};
+
+const loadState = async () => {
   transactions = await loadTransactions();
   categories = await loadCategories();
   capitalState = await migrateCapitalState();
   normalizeCapitalState();
 
+  const savedView = await Storage.get(VIEW_KEY);
+  const savedLayout = await Storage.get(LAYOUT_KEY);
+  const urlView = new URLSearchParams(window.location.search).get("view");
+  activeView = urlView || savedView || "dashboard";
+  currentLayout = savedLayout || "comfort";
+};
+
+const initializeApp = safeExec(async () => {
+  await Storage.init();
+  await loadState();
+
+  bindEvents();
   renderCategories();
   resetForm();
   initializeReportRange();
-  render();
-  capitalSetTab("overview");
-  renderCapitalView();
   updateUndoState();
-
-  const savedView = await dbGet(VIEW_KEY);
-  const savedLayout = await dbGet(LAYOUT_KEY);
-  const page = document.body.dataset.page || "main";
-  const urlView = page === "main" ? new URLSearchParams(window.location.search).get("view") : null;
-  const targetView = page === "capital"
-    ? "capital"
-    : (urlView || savedView || "dashboard");
-  setView(targetView);
-  setLayout(savedLayout || "comfort");
-};
+  updateTransactionFormState();
+  capitalSetTab("overview");
+  setLayout(currentLayout);
+  setView(activeView);
+}, "инициализация приложения");
 
 initializeApp();
